@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+import argparse
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+
+COMPOSE_DIR = "__SEEDBOX_HOME__/seedbox"
+MOUNT_POINT = "/mnt/exstore"
+SAMBA_SERVICE = "smbd"
+ALLOWED_CONTAINERS = {"gluetun", "qbittorrent", "jellyfin", "wetty", "filebrowser", "neko"}
+ALLOWED_SERVICES = {"docker", "docker.socket", "containerd", "smbd", "cups", "avahi-daemon", "bluetooth"}
+DEVICE_CANDIDATES = ["/dev/sdc1", "/dev/sdb1", "/dev/sdd1", "/dev/sdc", "/dev/sdb"]
+
+
+def run(cmd, check=False):
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if check and proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "command failed")
+    return proc
+
+
+def print_result(proc):
+    if proc.stdout:
+        sys.stdout.write(proc.stdout)
+    if proc.stderr:
+        sys.stderr.write(proc.stderr)
+    sys.exit(proc.returncode)
+
+
+def compose_base():
+    if shutil.which("docker-compose"):
+        return ["docker-compose"]
+    return ["docker", "compose"]
+
+
+def ensure_container(name):
+    if name not in ALLOWED_CONTAINERS:
+        raise SystemExit("Container not allowed: {}".format(name))
+
+
+def ensure_service(name):
+    if name not in ALLOWED_SERVICES:
+        raise SystemExit("Service not allowed: {}".format(name))
+
+
+def do_container_state(name, all_containers=False):
+    ensure_container(name)
+    cmd = ["docker", "ps"]
+    if all_containers:
+        cmd.append("-a")
+    cmd.extend(["--filter", "name=^{}$".format(name)])
+    if not all_containers:
+        cmd.extend(["--filter", "status=running"])
+    cmd.extend(["-q"])
+    print_result(run(cmd))
+
+
+def detect_disk():
+    proc = run(["blkid", "-L", "exstore"])
+    dev = proc.stdout.strip()
+    if dev:
+        return dev
+    proc = run(["blkid"])
+    if proc.returncode == 0:
+        for line in proc.stdout.splitlines():
+            if re.search(r"ntfs|exfat", line, re.IGNORECASE):
+                return line.split(":", 1)[0].strip()
+    for dev in DEVICE_CANDIDATES:
+        if os.path.exists(dev):
+            return dev
+    return ""
+
+
+def mount_disk():
+    dev = detect_disk()
+    if not dev:
+        sys.stderr.write("No external disk found\n")
+        sys.exit(1)
+    os.makedirs(MOUNT_POINT, exist_ok=True)
+    commands = [
+        ["mount", "-t", "ntfs-3g", "-o", "rw,uid=1000,gid=1000,umask=0000", dev, MOUNT_POINT],
+        ["mount", "-o", "uid=1000,gid=1000", dev, MOUNT_POINT],
+    ]
+    for cmd in commands:
+        proc = run(cmd)
+        if proc.returncode == 0:
+            sys.stdout.write(dev + "\n")
+            sys.exit(0)
+    if os.path.ismount(MOUNT_POINT):
+        sys.stdout.write(dev + "\n")
+        sys.exit(0)
+    sys.stderr.write("Mount failed for {}\n".format(dev))
+    sys.exit(1)
+
+
+def unmount_disk(lazy=False):
+    cmd = ["umount"]
+    if lazy:
+        cmd.append("-l")
+    cmd.append(MOUNT_POINT)
+    print_result(run(cmd))
+
+
+def container_ipify(name):
+    ensure_container(name)
+    for cmd in (
+        ["docker", "exec", name, "wget", "-qO-", "--timeout=10", "api.ipify.org"],
+        ["docker", "exec", name, "curl", "-fsS", "--max-time", "10", "api.ipify.org"],
+    ):
+        proc = run(cmd)
+        if proc.returncode == 0 and proc.stdout.strip():
+            print_result(proc)
+    sys.stderr.write("Could not fetch public IP from container\n")
+    sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("docker-info")
+
+    p = sub.add_parser("container-running")
+    p.add_argument("name")
+    p = sub.add_parser("container-exists")
+    p.add_argument("name")
+
+    for cmd_name in ("container-start", "container-stop", "container-restart"):
+        p = sub.add_parser(cmd_name)
+        p.add_argument("names", nargs="+")
+
+    p = sub.add_parser("container-rm")
+    p.add_argument("names", nargs="+")
+
+    p = sub.add_parser("container-logs")
+    p.add_argument("name")
+    p.add_argument("--tail", type=int, default=100)
+
+    p = sub.add_parser("container-stats")
+    p.add_argument("name")
+
+    p = sub.add_parser("container-mem")
+    p.add_argument("name")
+
+    p = sub.add_parser("container-ipify")
+    p.add_argument("name")
+
+    p = sub.add_parser("compose-up")
+    p.add_argument("--no-start", action="store_true")
+    p.add_argument("services", nargs="*")
+
+    sub.add_parser("compose-down")
+    sub.add_parser("docker-ps")
+    sub.add_parser("docker-images")
+    sub.add_parser("docker-stats")
+    sub.add_parser("docker-stop-all")
+
+    p = sub.add_parser("service")
+    p.add_argument("action", choices=["start", "stop", "restart"])
+    p.add_argument("services", nargs="+")
+
+    p = sub.add_parser("service-is-active")
+    p.add_argument("service")
+
+    p = sub.add_parser("journal")
+    p.add_argument("target", choices=["smbd", "docker", "system"])
+    p.add_argument("--tail", type=int, default=80)
+
+    p = sub.add_parser("smbstatus")
+    p.add_argument("--brief", action="store_true")
+
+    sub.add_parser("mount-disk")
+    p = sub.add_parser("unmount-disk")
+    p.add_argument("--lazy", action="store_true")
+
+    sub.add_parser("jellyfin-transcodes")
+
+    p = sub.add_parser("kill")
+    p.add_argument("pid", type=int)
+    p.add_argument("sig")
+
+    sub.add_parser("shutdown-now")
+    sub.add_parser("reboot-now")
+
+    args = parser.parse_args()
+
+    if args.cmd == "docker-info":
+        print_result(run(["docker", "info"]))
+    if args.cmd == "container-running":
+        do_container_state(args.name, all_containers=False)
+    if args.cmd == "container-exists":
+        do_container_state(args.name, all_containers=True)
+    if args.cmd in {"container-start", "container-stop", "container-restart"}:
+        for name in args.names:
+            ensure_container(name)
+        verb = args.cmd.split("-", 1)[1]
+        print_result(run(["docker", verb] + args.names))
+    if args.cmd == "container-rm":
+        for name in args.names:
+            ensure_container(name)
+        print_result(run(["docker", "rm", "-f"] + args.names))
+    if args.cmd == "container-logs":
+        ensure_container(args.name)
+        print_result(run(["docker", "logs", args.name, "--tail", str(args.tail)]))
+    if args.cmd == "container-stats":
+        ensure_container(args.name)
+        print_result(run(["docker", "stats", args.name, "--no-stream", "--format", "{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}"]))
+    if args.cmd == "container-mem":
+        ensure_container(args.name)
+        print_result(run(["docker", "stats", args.name, "--no-stream", "--format", "{{.MemUsage}}"]))
+    if args.cmd == "container-ipify":
+        container_ipify(args.name)
+    if args.cmd == "compose-up":
+        for name in args.services:
+            ensure_container(name)
+        cmd = compose_base() + ["up", "-d"]
+        if args.no_start:
+            cmd.append("--no-start")
+        cmd.extend(args.services)
+        print_result(run(cmd, check=False if not os.path.isdir(COMPOSE_DIR) else False))
+    if args.cmd == "compose-down":
+        print_result(run(compose_base() + ["down"], check=False if not os.path.isdir(COMPOSE_DIR) else False))
+    if args.cmd == "docker-ps":
+        print_result(run(["docker", "ps", "-a", "--format", "table {{.Names}}\t{{.Status}}\t{{.Ports}}"]))
+    if args.cmd == "docker-images":
+        print_result(run(["docker", "images", "--format", "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}"]))
+    if args.cmd == "docker-stats":
+        print_result(run(["docker", "stats", "--no-stream", "--format", "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"]))
+    if args.cmd == "docker-stop-all":
+        proc = run(["docker", "ps", "-q"])
+        ids = [x for x in proc.stdout.split() if x.strip()]
+        if not ids:
+            sys.exit(0)
+        print_result(run(["docker", "stop"] + ids))
+    if args.cmd == "service":
+        for name in args.services:
+            ensure_service(name)
+        print_result(run(["systemctl", args.action] + args.services))
+    if args.cmd == "service-is-active":
+        ensure_service(args.service)
+        print_result(run(["systemctl", "is-active", "--quiet", args.service]))
+    if args.cmd == "journal":
+        if args.target == "system":
+            print_result(run(["journalctl", "-n", str(args.tail), "--no-pager"]))
+        print_result(run(["journalctl", "-u", args.target, "-n", str(args.tail), "--no-pager"]))
+    if args.cmd == "smbstatus":
+        proc = run(["smbstatus", "-b"] if args.brief else ["smbstatus"])
+        print_result(proc)
+    if args.cmd == "mount-disk":
+        mount_disk()
+    if args.cmd == "unmount-disk":
+        unmount_disk(lazy=args.lazy)
+    if args.cmd == "jellyfin-transcodes":
+        print_result(run(["docker", "exec", "jellyfin", "ls", "/config/data/transcodes/"]))
+    if args.cmd == "kill":
+        sig = getattr(signal, "SIG{}".format(args.sig.upper()), None)
+        if sig is None:
+            raise SystemExit("Invalid signal: {}".format(args.sig))
+        os.kill(args.pid, sig)
+        sys.exit(0)
+    if args.cmd == "shutdown-now":
+        os.execvp("shutdown", ["shutdown", "now"])
+    if args.cmd == "reboot-now":
+        os.execvp("reboot", ["reboot"])
+
+
+if __name__ == "__main__":
+    os.chdir(COMPOSE_DIR if os.path.isdir(COMPOSE_DIR) else "/")
+    main()

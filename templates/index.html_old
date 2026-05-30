@@ -1,0 +1,1555 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Seedbox Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root[data-theme="dark"]{
+  --bg:#07090d;--bg2:#0c1018;--bg3:#111620;--bg4:#161d28;
+  --bdr:#1a2230;--bdr2:#233042;--bdr3:#2e3f52;
+  --tx:#b8cce4;--tx2:#6a84a4;--tx3:#344a62;
+  --sh:0 4px 20px #00000090;--sh2:0 1px 6px #00000060;--gop:.13
+}
+:root[data-theme="light"]{
+  --bg:#edf0f5;--bg2:#fff;--bg3:#f4f6fa;--bg4:#eef1f7;
+  --bdr:#d8e0ec;--bdr2:#c4cfdf;--bdr3:#adbdcf;
+  --tx:#18253a;--tx2:#526275;--tx3:#9aafc2;
+  --sh:0 4px 20px #0000001a;--sh2:0 1px 6px #00000010;--gop:.05
+}
+:root{
+  --gr:#00d48a;--grd:#00d48a14;--grb:#00d48a38;
+  --rd:#f03a5f;--rdd:#f03a5f14;--rdb:#f03a5f38;
+  --yl:#ffba2e;--yld:#ffba2e14;--ylb:#ffba2e38;
+  --bl:#3898ff;--bld:#3898ff14;--blb:#3898ff38;
+  --cy:#00cff5;--cyd:#00cff514;--cyb:#00cff538;
+  --pu:#9d7cf4;--pud:#9d7cf414;--pub:#9d7cf438;
+  --or:#ff723f;--ord:#ff723f14;--orb:#ff723f38;
+  --pk:#f03aac;--pkd:#f03aac14;--pkb:#f03aac38;
+  --mono:'JetBrains Mono',monospace;
+  --display:'Syne',sans-serif;
+  --r:10px;--r2:14px
+}
+html{font-size:14px}
+@media(max-width:600px){html{font-size:13px}}
+body{background:var(--bg);color:var(--tx);font-family:var(--mono);min-height:100vh;overflow-x:hidden;transition:background .3s,color .3s}
+body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:radial-gradient(ellipse at 10% 10%,#00d48a05 0,transparent 60%),
+    radial-gradient(ellipse at 90% 90%,#3898ff04 0,transparent 60%),
+    linear-gradient(var(--bdr) 1px,transparent 1px),
+    linear-gradient(90deg,var(--bdr) 1px,transparent 1px);
+  background-size:100%,100%,32px 32px,32px 32px;opacity:var(--gop)}
+.shell{display:flex;flex-direction:column;height:100vh;position:relative;z-index:1}
+
+/* Nav */
+nav{display:flex;align-items:center;background:var(--bg2);border-bottom:1px solid var(--bdr);flex-shrink:0;position:relative}
+.nav-logo{display:flex;align-items:center;gap:.6rem;padding:.75rem 1.1rem;border-right:1px solid var(--bdr);flex-shrink:0}
+.nav-logo-t{font-family:var(--display);font-size:1rem;font-weight:800;color:var(--gr);letter-spacing:.02em}
+.nav-logo-s{font-size:.6rem;color:var(--tx2);letter-spacing:.1em;text-transform:uppercase}
+.nav-tabs{display:flex;flex:1;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.nav-tabs::-webkit-scrollbar{display:none}
+.nav-menu-btn{display:none;align-items:center;justify-content:center;width:40px;height:40px;border:none;background:transparent;color:var(--tx2);cursor:pointer;font-size:1.2rem;flex-shrink:0}
+@media(max-width:720px){
+  .nav-menu-btn{display:flex}
+  .nav-tabs{display:none;position:absolute;top:100%;left:0;right:0;z-index:999;background:var(--bg2);border-bottom:1px solid var(--bdr);flex-direction:column;box-shadow:0 8px 24px #00000040}
+  .nav-tabs.open{display:flex}
+  .ntab{width:100%;border-bottom:1px solid var(--bdr)!important;padding:.9rem 1.2rem!important}
+  .ntab.active{border-left:3px solid var(--gr)!important}
+}
+.ntab{display:flex;align-items:center;gap:.5rem;padding:.78rem 1rem;font-size:.7rem;font-weight:500;color:var(--tx2);cursor:pointer;border:none;background:transparent;border-bottom:2px solid transparent;white-space:nowrap;transition:all .18s;letter-spacing:.04em;font-family:var(--mono)}
+.ntab:hover{color:var(--tx);background:var(--bg3)}
+.ntab.active{color:var(--gr);border-bottom-color:var(--gr);background:var(--bg3)}
+.ndot{width:7px;height:7px;border-radius:50%;background:var(--tx3);flex-shrink:0;transition:background .3s}
+.ntab.active .ndot,.ntab:hover .ndot{background:var(--gr)}
+.ndot.g{background:var(--gr);box-shadow:0 0 5px var(--gr)}
+.ndot.r{background:var(--rd)}
+.ndot.y{background:var(--yl)}
+.nav-right{display:flex;align-items:center;gap:.4rem;padding:.5rem .8rem;border-left:1px solid var(--bdr);flex-shrink:0}
+.pill{font-size:.58rem;padding:.18rem .54rem;border-radius:20px;background:var(--grd);color:var(--gr);border:1px solid var(--grb);font-weight:500;letter-spacing:.06em;white-space:nowrap}
+.pill.warn{background:var(--yld);color:var(--yl);border-color:var(--ylb)}
+.pill.bad{background:var(--rdd);color:var(--rd);border-color:var(--rdb)}
+.ico{width:28px;height:28px;border-radius:6px;background:var(--bg3);border:1px solid var(--bdr2);color:var(--tx2);cursor:pointer;font-size:.78rem;display:flex;align-items:center;justify-content:center;transition:all .18s;user-select:none;flex-shrink:0}
+.ico:hover{border-color:var(--gr);color:var(--gr)}
+.ico.spin{animation:spin .65s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Panels */
+.panels{flex:1;overflow:hidden;position:relative}
+.panel{display:none;height:100%;overflow-y:auto;padding:1.1rem}
+.panel.active{display:block}
+.panel.embed{display:none;height:100%;overflow:hidden;padding:0}
+.panel.embed.active{display:flex;flex-direction:column}
+.panel::-webkit-scrollbar{width:4px}
+.panel::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:2px}
+
+/* Grids */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1rem}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1rem}
+.g7{display:grid;grid-template-columns:repeat(7,1fr);gap:1rem;margin-bottom:1rem}
+@media(max-width:1100px){.g7{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:900px){.g3{grid-template-columns:1fr 1fr}.g4,.g7{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.g2,.g3,.g4,.g7{grid-template-columns:1fr}}
+
+/* Cards */
+.card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r2);padding:1rem 1.1rem;box-shadow:var(--sh2);transition:border-color .2s}
+.card:hover{border-color:var(--bdr2)}
+.card.ag{border-left:3px solid var(--gr)}.card.ab{border-left:3px solid var(--bl)}
+.card.ay{border-left:3px solid var(--yl)}.card.ar{border-left:3px solid var(--rd)}
+.card.acy{border-left:3px solid var(--cy)}.card.apu{border-left:3px solid var(--pu)}
+.card.aor{border-left:3px solid var(--or)}.card.apk{border-left:3px solid var(--pk)}
+.ct{font-size:.62rem;font-weight:500;text-transform:uppercase;letter-spacing:.14em;color:var(--tx2);margin-bottom:.85rem;display:flex;align-items:center;justify-content:space-between}
+.ctl{display:flex;align-items:center;gap:.4rem}
+.ctd{width:3px;height:9px;border-radius:2px;background:var(--gr);flex-shrink:0}
+.ctd.b{background:var(--bl)}.ctd.y{background:var(--yl)}.ctd.r{background:var(--rd)}
+.ctd.cy{background:var(--cy)}.ctd.pu{background:var(--pu)}.ctd.or{background:var(--or)}.ctd.pk{background:var(--pk)}
+
+/* Service rows */
+.srow{display:flex;align-items:center;justify-content:space-between;padding:.48rem 0;border-bottom:1px solid var(--bdr)}
+.srow:last-child{border-bottom:none;padding-bottom:0}
+.si{display:flex;align-items:center;gap:.55rem}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;transition:background .3s}
+.dot.g{background:var(--gr);box-shadow:0 0 6px var(--gr);animation:dp 2.5s infinite}
+.dot.r{background:var(--rd)}.dot.y{background:var(--yl)}
+@keyframes dp{0%,100%{opacity:1}50%{opacity:.25}}
+.sn{font-size:.8rem;color:var(--tx)}
+.bdg{font-size:.56rem;padding:.12rem .46rem;border-radius:4px;font-weight:500;letter-spacing:.04em}
+.bdg.g{background:var(--grd);color:var(--gr);border:1px solid var(--grb)}
+.bdg.r{background:var(--rdd);color:var(--rd);border:1px solid var(--rdb)}
+.bdg.y{background:var(--yld);color:var(--yl);border:1px solid var(--ylb)}
+.bdg.b{background:var(--bld);color:var(--bl);border:1px solid var(--blb)}
+.bdg.cy{background:var(--cyd);color:var(--cy);border:1px solid var(--cyb)}
+.bdg.or{background:var(--ord);color:var(--or);border:1px solid var(--orb)}
+
+/* KV rows */
+.kv{display:flex;align-items:center;justify-content:space-between;padding:.42rem 0;border-bottom:1px solid var(--bdr);font-size:.76rem}
+.kv:last-child{border-bottom:none;padding-bottom:0}
+.kk{color:var(--tx2);font-size:.64rem;letter-spacing:.04em}
+.vv{color:var(--tx);text-align:right}
+.vv.g{color:var(--gr)}.vv.r{color:var(--rd)}.vv.y{color:var(--yl)}.vv.cy{color:var(--cy)}.vv.b{color:var(--bl)}
+
+/* Stats */
+.bsv{font-family:var(--display);font-size:1.85rem;font-weight:700;line-height:1;margin-bottom:.2rem}
+.bsv.g{color:var(--gr)}.bsv.r{color:var(--rd)}.bsv.y{color:var(--yl)}.bsv.b{color:var(--bl)}.bsv.cy{color:var(--cy)}
+.bsl{font-size:.6rem;color:var(--tx2);letter-spacing:.05em;text-transform:uppercase}
+.bar{height:3px;background:var(--bg3);border-radius:3px;margin-top:.6rem;overflow:hidden}
+.barf{height:100%;border-radius:3px;transition:width .6s ease,background .3s}
+.barf.g{background:var(--gr)}.barf.r{background:var(--rd)}.barf.y{background:var(--yl)}
+
+/* Buttons */
+.btn{font-size:.68rem;font-weight:500;padding:.4rem .82rem;border-radius:6px;cursor:pointer;border:1px solid transparent;display:inline-flex;align-items:center;gap:.3rem;transition:all .15s;white-space:nowrap;outline:none;letter-spacing:.02em;font-family:var(--mono)}
+.btn:disabled{opacity:.3;cursor:not-allowed}
+.btn.g{background:var(--grd);color:var(--gr);border-color:var(--grb)}.btn.g:hover:not(:disabled){background:var(--gr);color:#000}
+.btn.r{background:var(--rdd);color:var(--rd);border-color:var(--rdb)}.btn.r:hover:not(:disabled){background:var(--rd);color:#fff}
+.btn.y{background:var(--yld);color:var(--yl);border-color:var(--ylb)}.btn.y:hover:not(:disabled){background:var(--yl);color:#000}
+.btn.b{background:var(--bld);color:var(--bl);border-color:var(--blb)}.btn.b:hover:not(:disabled){background:var(--bl);color:#fff}
+.btn.cy{background:var(--cyd);color:var(--cy);border-color:var(--cyb)}.btn.cy:hover:not(:disabled){background:var(--cy);color:#000}
+.btn.pu{background:var(--pud);color:var(--pu);border-color:var(--pub)}.btn.pu:hover:not(:disabled){background:var(--pu);color:#fff}
+.btn.or{background:var(--ord);color:var(--or);border-color:var(--orb)}.btn.or:hover:not(:disabled){background:var(--or);color:#fff}
+.btn.pk{background:var(--pkd);color:var(--pk);border-color:var(--pkb)}.btn.pk:hover:not(:disabled){background:var(--pk);color:#fff}
+.btn.gh{background:transparent;color:var(--tx2);border-color:var(--bdr2)}.btn.gh:hover:not(:disabled){color:var(--tx);border-color:var(--bdr3)}
+a.btn{text-decoration:none}
+.bg{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.65rem}
+.sep{margin-top:.9rem;padding-top:.9rem;border-top:1px solid var(--bdr)}
+
+/* Toasts */
+#tc{position:fixed;top:.9rem;right:.9rem;z-index:9999;display:flex;flex-direction:column;gap:.35rem;pointer-events:none;max-width:320px}
+.toast{font-size:.68rem;padding:.55rem .85rem;border-radius:7px;border:1px solid;pointer-events:all;cursor:pointer;animation:tin .2s ease;line-height:1.5}
+.toast.ok{background:var(--grd);color:var(--gr);border-color:var(--grb)}
+.toast.err{background:var(--rdd);color:var(--rd);border-color:var(--rdb)}
+.toast.info{background:var(--bld);color:var(--bl);border-color:var(--blb)}
+@keyframes tin{from{transform:translateX(105%);opacity:0}to{transform:none;opacity:1}}
+
+/* Modals */
+.overlay{display:none;position:fixed;inset:0;z-index:8888;background:#00000092;backdrop-filter:blur(4px);align-items:center;justify-content:center}
+.overlay.show{display:flex}
+.mbox{background:var(--bg2);border:1px solid var(--bdr2);border-radius:var(--r2);padding:1.5rem;max-width:380px;width:92%;animation:mbi .2s ease}
+@keyframes mbi{from{transform:scale(.9);opacity:0}to{transform:none;opacity:1}}
+.mbox h3{font-family:var(--display);font-size:.95rem;color:var(--rd);margin-bottom:.5rem;font-weight:700}
+.mbox p{font-size:.76rem;color:var(--tx2);line-height:1.65;margin-bottom:1.1rem}
+.mbtns{display:flex;gap:.45rem;justify-content:flex-end}
+.tbox{background:var(--bg2);border:1px solid var(--bdr2);border-radius:var(--r2);width:min(820px,96vw);max-height:88vh;display:flex;flex-direction:column;animation:mbi .2s ease}
+.tbox-hdr{display:flex;align-items:center;justify-content:space-between;padding:.75rem 1.1rem;border-bottom:1px solid var(--bdr);flex-shrink:0;gap:.5rem}
+.tbox-title{font-family:var(--display);font-size:.85rem;font-weight:700;color:var(--tx)}
+.tbox-body{font-size:.7rem;line-height:1.75;padding:.9rem 1.1rem;overflow-y:auto;color:#5a88a8;white-space:pre-wrap;word-break:break-all;flex:1;background:var(--bg)}
+.tbox-body::-webkit-scrollbar{width:3px}
+.tbox-body::-webkit-scrollbar-thumb{background:var(--bdr2)}
+
+/* Logs */
+.ltabs{display:flex;gap:.28rem;margin-bottom:.55rem;flex-wrap:wrap}
+.lt{font-size:.58rem;padding:.24rem .62rem;border-radius:5px;cursor:pointer;border:1px solid var(--bdr2);background:transparent;color:var(--tx2);letter-spacing:.06em;text-transform:uppercase;transition:all .15s;font-family:var(--mono)}
+.lt.a{background:var(--bg3);color:var(--gr);border-color:var(--grb)}.lt:hover:not(.a){color:var(--tx)}
+#log-out{font-size:.7rem;line-height:1.78;background:var(--bg);border:1px solid var(--bdr);border-radius:8px;padding:.8rem;height:calc(100vh - 260px);min-height:220px;overflow-y:auto;color:#5a88a8;white-space:pre-wrap;word-break:break-all}
+#log-out::-webkit-scrollbar{width:3px}
+#log-out::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:2px}
+
+/* Process table */
+.ptbl{width:100%;border-collapse:collapse;font-size:.73rem}
+.ptbl th{color:var(--tx2);font-weight:400;text-align:left;padding:.2rem 0 .4rem;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--bdr)}
+.ptbl td{padding:.32rem 0;border-bottom:1px solid var(--bdr);color:var(--tx);vertical-align:middle}
+.ptbl tr:last-child td{border-bottom:none}
+.ptbl td:nth-child(2),.ptbl td:nth-child(3){text-align:right;color:var(--tx2)}
+.ptbl td:last-child{text-align:right}
+.kill-btn{font-size:.52rem;padding:.08rem .3rem;border-radius:4px;cursor:pointer;border:1px solid var(--rdb);background:var(--rdd);color:var(--rd);font-family:var(--mono);transition:all .15s}
+.kill-btn:hover{background:var(--rd);color:#fff}
+
+/* Temps */
+.tg{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.2rem}
+.tc{font-size:.66rem;padding:.22rem .5rem;border-radius:5px;background:var(--bg3);border:1px solid var(--bdr2);display:flex;align-items:center;gap:.32rem}
+.tv{font-weight:700}.tv.g{color:var(--gr)}.tv.y{color:var(--yl)}.tv.r{color:var(--rd)}
+.tn{color:var(--tx2);font-size:.6rem}
+
+/* Torrent stats */
+.qstat{display:flex;align-items:center;justify-content:space-between;padding:.38rem 0;border-bottom:1px solid var(--bdr);font-size:.73rem}
+.qstat:last-child{border-bottom:none}.qk{color:var(--tx2);font-size:.62rem}
+
+/* Samba */
+.conn{display:flex;align-items:center;gap:.45rem;padding:.32rem 0;border-bottom:1px solid var(--bdr);font-size:.7rem}
+.conn:last-child{border-bottom:none}
+.conn-ic{width:17px;height:17px;border-radius:50%;background:var(--bld);display:flex;align-items:center;justify-content:center;font-size:.58rem;color:var(--bl);flex-shrink:0}
+
+/* Embed frames */
+.embed-toolbar{display:flex;align-items:center;justify-content:space-between;padding:.6rem 1.1rem;background:var(--bg2);border-bottom:1px solid var(--bdr);flex-shrink:0;flex-wrap:wrap;gap:.4rem}
+.embed-title{font-size:.74rem;color:var(--tx2);letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.embed-actions{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.embed-frame{flex:1;border:none;background:var(--bg3);width:100%}
+.embed-offline{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.75rem;color:var(--tx2)}
+.embed-offline .oi{font-size:2.5rem;opacity:.4}
+.embed-offline p{font-size:.78rem;color:var(--tx2);text-align:center;line-height:1.65}
+
+/* Downloads */
+.dl-form{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r2);padding:1.05rem;margin-bottom:1rem}
+.dl-label{font-size:.62rem;color:var(--tx2);letter-spacing:.08em;text-transform:uppercase;margin-bottom:.38rem;display:block}
+.dl-textarea{width:100%;background:var(--bg);border:1px solid var(--bdr2);border-radius:8px;color:var(--tx);font-family:var(--mono);font-size:.75rem;padding:.65rem .8rem;resize:vertical;min-height:95px;outline:none;line-height:1.65;transition:border-color .2s}
+.dl-textarea:focus{border-color:var(--gr)}
+.dl-textarea::placeholder{color:var(--tx3)}
+.dl-row{display:flex;gap:.65rem;margin-top:.7rem;flex-wrap:wrap;align-items:flex-end}
+.dl-select{background:var(--bg3);border:1px solid var(--bdr2);border-radius:7px;color:var(--tx);font-family:var(--mono);font-size:.72rem;padding:.42rem .7rem;outline:none;cursor:pointer;min-width:160px;transition:border-color .2s}
+.dl-select:focus{border-color:var(--gr)}
+.dl-input{background:var(--bg3);border:1px solid var(--bdr2);border-radius:7px;color:var(--tx);font-family:var(--mono);font-size:.72rem;padding:.42rem .7rem;outline:none;flex:1;min-width:200px;transition:border-color .2s}
+.dl-input:focus{border-color:var(--gr)}
+.dl-input::placeholder{color:var(--tx3)}
+.dl-path-display{font-family:var(--mono);font-size:.68rem;color:var(--gr);padding:.3rem .5rem;background:var(--grd);border:1px solid var(--grb);border-radius:5px;margin-top:.4rem;display:none}
+
+/* Job cards */
+.job-card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r2);padding:.9rem 1.05rem;margin-bottom:.75rem;transition:border-color .2s}
+.job-card:hover{border-color:var(--bdr2)}
+.job-out{font-family:var(--mono);font-size:.67rem;line-height:1.7;background:var(--bg);border:1px solid var(--bdr);border-radius:6px;padding:.6rem .75rem;max-height:220px;overflow-y:auto;color:#4a7a9a;white-space:pre-wrap;word-break:break-all;display:none;margin-top:.4rem}
+.job-out.expanded{display:block}
+.job-out::-webkit-scrollbar{width:3px}
+.job-out::-webkit-scrollbar-thumb{background:var(--bdr2)}
+
+/* Path browser */
+#path-modal{display:none;position:fixed;inset:0;z-index:8888;background:#00000092;backdrop-filter:blur(4px);align-items:center;justify-content:center}
+#path-modal.show{display:flex}
+.pbox{background:var(--bg2);border:1px solid var(--bdr2);border-radius:var(--r2);width:min(540px,96vw);max-height:72vh;display:flex;flex-direction:column;animation:mbi .2s ease}
+.pbox-hdr{display:flex;align-items:center;justify-content:space-between;padding:.75rem 1.1rem;border-bottom:1px solid var(--bdr);flex-shrink:0}
+.pbox-title{font-family:var(--display);font-size:.85rem;font-weight:700;color:var(--tx)}
+.pbox-path{font-family:var(--mono);font-size:.66rem;color:var(--cy);padding:.42rem 1.1rem;border-bottom:1px solid var(--bdr);background:var(--bg3);word-break:break-all}
+.pbox-list{overflow-y:auto;flex:1}
+.pentry{display:flex;align-items:center;gap:.5rem;padding:.55rem 1.1rem;cursor:pointer;font-size:.74rem;color:var(--tx);border-bottom:1px solid var(--bdr);transition:background .15s}
+.pentry:hover{background:var(--bg3)}
+.pentry:last-child{border-bottom:none}
+.pbox-footer{padding:.65rem 1.1rem;border-top:1px solid var(--bdr);display:flex;justify-content:flex-end;gap:.4rem;flex-shrink:0}
+
+/* Rename modal */
+#rename-modal{display:none;position:fixed;inset:0;z-index:9000;background:#00000092;backdrop-filter:blur(4px);align-items:center;justify-content:center}
+#rename-modal.show{display:flex}
+.rbox{background:var(--bg2);border:1px solid var(--bdr2);border-radius:var(--r2);padding:1.5rem;max-width:420px;width:94%;animation:mbi .2s ease}
+.rbox h3{font-family:var(--display);font-size:.9rem;font-weight:700;color:var(--tx);margin-bottom:.9rem}
+.rbox-old{font-size:.66rem;color:var(--tx3);margin-bottom:.65rem;word-break:break-all}
+.rbox input{width:100%;background:var(--bg3);border:1px solid var(--bdr2);border-radius:7px;color:var(--tx);font-family:var(--mono);font-size:.78rem;padding:.45rem .75rem;outline:none;transition:border-color .2s}
+.rbox input:focus{border-color:var(--gr)}
+.rbox-btns{display:flex;gap:.45rem;justify-content:flex-end;margin-top:1rem}
+
+/* File manager */
+.fm-path{font-size:.68rem;color:var(--cy);font-family:var(--mono);padding:.3rem .6rem;background:var(--bg3);border:1px solid var(--bdr);border-radius:6px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fm-toolbar{display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap}
+.fm-entry{display:flex;align-items:center;gap:.55rem;padding:.46rem .6rem;border-bottom:1px solid var(--bdr);cursor:pointer;transition:background .12s;font-size:.74rem;border-radius:4px}
+.fm-entry:hover{background:var(--bg3)}
+.fm-entry:last-child{border-bottom:none}
+.fm-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fm-meta{font-size:.62rem;color:var(--tx3);flex-shrink:0;text-align:right;min-width:60px}
+.fm-actions{display:flex;gap:.25rem;flex-shrink:0;opacity:0;transition:opacity .15s}
+.fm-entry:hover .fm-actions{opacity:1}
+.fm-icon{font-size:.85rem;flex-shrink:0;width:18px;text-align:center}
+
+/* Terminal runner */
+#runner-out{font-family:var(--mono);font-size:.7rem;line-height:1.72;background:var(--bg);border:1px solid var(--bdr);border-radius:8px;padding:.8rem;min-height:120px;height:calc(100vh - 340px);overflow-y:auto;color:#5a88a8;white-space:pre-wrap;word-break:break-all}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:2px}
+@keyframes pulsebar{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
+</style>
+</head>
+<body>
+<div id="tc"></div>
+
+<!-- Confirm modal -->
+<div class="overlay" id="modal">
+  <div class="mbox">
+    <h3 id="m-title">Confirm</h3>
+    <p  id="m-body">Are you sure?</p>
+    <div class="mbtns">
+      <button class="btn gh" onclick="closeModal()">Cancel</button>
+      <button class="btn r"  id="m-ok">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Output modal -->
+<div class="overlay" id="term-modal">
+  <div class="tbox">
+    <div class="tbox-hdr">
+      <span class="tbox-title" id="term-title">Output</span>
+      <div style="display:flex;gap:.4rem">
+        <button class="btn gh" style="font-size:.58rem;padding:.22rem .5rem" onclick="copyTermOutput()">Copy</button>
+        <button class="ico" onclick="closeTerm()">X</button>
+      </div>
+    </div>
+    <div class="tbox-body" id="term-body"></div>
+  </div>
+</div>
+
+<!-- Rename modal -->
+<div id="rename-modal">
+  <div class="rbox">
+    <h3>Rename</h3>
+    <div class="rbox-old" id="rename-old"></div>
+    <input type="text" id="rename-input" placeholder="New name" autocomplete="off" spellcheck="false">
+    <div class="rbox-btns">
+      <button class="btn gh" onclick="closeRename()">Cancel</button>
+      <button class="btn g"  onclick="doRename()">Rename</button>
+    </div>
+  </div>
+</div>
+
+<div class="shell">
+<nav>
+  <div class="nav-logo">
+    <div>
+      <div class="nav-logo-t">SEEDBOX</div>
+      <div class="nav-logo-s">amit - home server</div>
+    </div>
+  </div>
+  <button class="nav-menu-btn" id="menu-btn" onclick="toggleMenu()">&#9776;</button>
+  <div class="nav-tabs" id="nav-tabs">
+    <button class="ntab active" data-tab="dashboard" onclick="switchTab('dashboard',this)"><span class="ndot" id="nt-dash"></span>Dashboard</button>
+    <button class="ntab" data-tab="controls"  onclick="switchTab('controls',this)"><span class="ndot"></span>Controls</button>
+    <button class="ntab" data-tab="logs"      onclick="switchTab('logs',this)"><span class="ndot b" style="background:var(--bl)"></span>Logs</button>
+    <button class="ntab" data-tab="terminal"  onclick="switchTab('terminal',this)"><span class="ndot" id="nt-wetty"></span>Terminal</button>
+    <button class="ntab" data-tab="files"     onclick="switchTab('files',this)"><span class="ndot" id="nt-fb"></span>FileBrowser</button>
+    <button class="ntab" data-tab="jellyfin"  onclick="switchTab('jellyfin',this)"><span class="ndot" id="nt-jf"></span>Jellyfin</button>
+    <button class="ntab" data-tab="downloads" onclick="switchTab('downloads',this)"><span class="ndot y" style="background:var(--yl)"></span>Downloads</button>
+    <button class="ntab" data-tab="filemgr"   onclick="switchTab('filemgr',this);loadFM()"><span class="ndot" style="background:var(--cy)"></span>Files</button>
+    <button class="ntab" data-tab="runner"    onclick="switchTab('runner',this)"><span class="ndot" style="background:var(--or)"></span>Run Cmd</button>
+  </div>
+  <div class="nav-right">
+    <span style="font-size:.56rem;color:var(--tx3)" id="hts">--</span>
+    <span class="pill" id="h-pill">loading</span>
+    <button class="ico" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">*</button>
+    <button class="ico" id="rfr" onclick="fetchStatus()" title="Refresh">R</button>
+  </div>
+</nav>
+
+<div class="panels">
+
+<!-- Dashboard -->
+<div class="panel active" id="panel-dashboard">
+  <div class="g3">
+    <div class="card ag">
+      <div class="ct"><div class="ctl"><div class="ctd"></div>Services</div></div>
+      <div class="srow"><div class="si"><div class="dot" id="d-gl"></div><span class="sn">Gluetun VPN</span></div><span class="bdg" id="b-gl"></span></div>
+      <div class="srow"><div class="si"><div class="dot" id="d-qb"></div><span class="sn">qBittorrent</span></div><span class="bdg" id="b-qb"></span></div>
+      <div class="srow"><div class="si"><div class="dot" id="d-jf"></div><span class="sn">Jellyfin</span></div><span class="bdg" id="b-jf"></span></div>
+      <div class="srow"><div class="si"><div class="dot" id="d-sm"></div><span class="sn">Samba</span></div><span class="bdg" id="b-sm"></span></div>
+      <div class="srow"><div class="si"><div class="dot" id="d-wt"></div><span class="sn">Wetty</span></div><span class="bdg" id="b-wt"></span></div>
+      <div class="srow"><div class="si"><div class="dot" id="d-fb"></div><span class="sn">FileBrowser</span></div><span class="bdg" id="b-fb"></span></div>
+      <div class="srow"><div class="si"><div class="dot" id="d-dk"></div><span class="sn">Docker</span></div><span class="bdg" id="b-dk"></span></div>
+      <div class="srow"><div class="si"><div class="dot" id="d-ds"></div><span class="sn">External Disk</span></div><span class="bdg" id="b-ds"></span></div>
+    </div>
+    <div class="card ab">
+      <div class="ct"><div class="ctl"><div class="ctd b"></div>Network</div></div>
+      <div class="kv"><span class="kk">Local IP</span><span class="vv y" id="n-lip">--</span></div>
+      <div class="kv"><span class="kk">Home IP</span><span class="vv" id="n-hip">--</span></div>
+      <div class="kv"><span class="kk">VPN IP</span>
+        <div style="display:flex;align-items:center;gap:.35rem">
+          <span class="vv" id="n-vip">--</span><span class="bdg" id="n-vbdg"></span>
+        </div>
+      </div>
+      <div class="kv"><span class="kk">AvistaZ target</span><span class="vv cy" id="n-aip">--</span></div>
+      <div class="kv"><span class="kk">RX</span><span class="vv g" id="n-rx">--</span></div>
+      <div class="kv"><span class="kk">TX</span><span class="vv y" id="n-tx">--</span></div>
+      <div class="kv"><span class="kk">Uptime</span><span class="vv" id="n-up">--</span></div>
+      <div class="kv" id="disk-row" style="display:none"><span class="kk">Disk used</span><span class="vv" id="n-disk">--</span></div>
+    </div>
+    <div class="card acy">
+      <div class="ct"><div class="ctl"><div class="ctd cy"></div>Torrents</div><span class="bdg cy" id="qb-live" style="display:none">Live</span></div>
+      <div class="qstat"><span class="qk">Total</span><span id="q-total">--</span></div>
+      <div class="qstat"><span class="qk">Downloading</span><span id="q-dl" style="color:var(--gr)">--</span></div>
+      <div class="qstat"><span class="qk">Seeding</span><span id="q-seed" style="color:var(--bl)">--</span></div>
+      <div class="qstat"><span class="qk">Paused</span><span id="q-paused" style="color:var(--yl)">--</span></div>
+      <div class="qstat"><span class="qk">Errored</span><span id="q-err" style="color:var(--rd)">--</span></div>
+      <div class="qstat"><span class="qk">DL Speed</span><span id="q-dlspd" style="color:var(--gr)">--</span></div>
+      <div class="qstat"><span class="qk">UL Speed</span><span id="q-ulspd" style="color:var(--yl)">--</span></div>
+      <div class="qstat"><span class="qk">Downloaded</span><span id="q-dltot">--</span></div>
+      <div class="qstat"><span class="qk">Uploaded</span><span id="q-ultot">--</span></div>
+    </div>
+  </div>
+  <div class="g7">
+    <div class="card"><div class="ct"><div class="ctl"><div class="ctd"></div>CPU</div></div><div class="bsv g" id="s-cpu">--</div><div class="bsl">usage</div><div class="bar"><div class="barf g" id="pb-cpu" style="width:0%"></div></div></div>
+    <div class="card"><div class="ct"><div class="ctl"><div class="ctd"></div>RAM</div></div><div class="bsv g" id="s-ram">--</div><div class="bsl" id="s-ram-s">--</div><div class="bar"><div class="barf g" id="pb-ram" style="width:0%"></div></div></div>
+    <div class="card"><div class="ct"><div class="ctl"><div class="ctd pu"></div>Swap</div></div><div class="bsv pu" id="s-swap">--</div><div class="bsl" id="s-swap-s">--</div><div class="bar"><div class="barf" id="pb-swap" style="width:0%;background:var(--pu)"></div></div></div>
+    <div class="card"><div class="ct"><div class="ctl"><div class="ctd b"></div>Load</div></div><div class="bsv b" id="s-load" style="font-size:.95rem;margin-top:.3rem;line-height:1.4">--</div><div class="bsl" id="s-cores">--</div></div>
+    <div class="card"><div class="ct"><div class="ctl"><div class="ctd y"></div>Temp</div></div><div class="tg" id="tg"><span style="font-size:.62rem;color:var(--tx2)">loading...</span></div></div>
+    <div class="card"><div class="ct"><div class="ctl"><div class="ctd or"></div>Disk I/O</div></div>
+      <div class="kv" style="border:none;padding:.15rem 0"><span class="kk">Read</span><span class="vv g" id="s-dr">--</span></div>
+      <div class="kv" style="border:none;padding:.15rem 0"><span class="kk">Write</span><span class="vv y" id="s-dw">--</span></div>
+    </div>
+    <div class="card acy"><div class="ct"><div class="ctl"><div class="ctd cy"></div>Samba</div></div><div class="bsv cy" id="s-smb">--</div><div class="bsl">connections</div><div style="margin-top:.4rem;font-size:.62rem;color:var(--tx2)" id="s-smb-sh">--</div></div>
+  </div>
+  <div class="g2">
+    <div class="card aor">
+      <div class="ct"><div class="ctl"><div class="ctd or"></div>Jellyfin</div></div>
+      <div id="jf-stat" style="font-size:.7rem;color:var(--tx2)">checking...</div>
+      <a class="btn or" id="jf-link" href="#" target="_blank" rel="noopener" style="display:none;margin-top:.6rem;font-size:.65rem">Open Jellyfin</a>
+    </div>
+    <div class="card apu">
+      <div class="ct"><div class="ctl"><div class="ctd pu"></div>Quick Links</div></div>
+      <div id="qlinks" style="display:flex;flex-wrap:wrap;gap:.35rem"><span style="font-size:.62rem;color:var(--tx2)">Start services...</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ct">
+      <div class="ctl"><div class="ctd"></div>Top Processes</div>
+      <button class="btn gh" style="font-size:.56rem;padding:.18rem .48rem" onclick="fetchProcs()">Refresh</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="ptbl">
+        <thead><tr><th>Process</th><th>PID</th><th style="text-align:right">RAM%</th><th style="text-align:right">CPU%</th><th style="text-align:right">Elapsed</th><th style="text-align:right">Kill</th></tr></thead>
+        <tbody id="proc-body"><tr><td colspan="6" style="color:var(--tx2)">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Controls -->
+<div class="panel" id="panel-controls">
+  <div class="g3">
+    <div class="card ag">
+      <div class="ct"><div class="ctl"><div class="ctd"></div>Seedbox (VPN + qBit)</div></div>
+      <div class="bg">
+        <button class="btn g"  onclick="act('start_seedbox')">Start</button>
+        <button class="btn r"  onclick="act('stop_seedbox')">Stop</button>
+        <button class="btn y"  onclick="act('restart_seedbox')">Restart</button>
+        <button class="btn b"  onclick="act('check_ip')">Check IP</button>
+      </div>
+      <div class="sep">
+        <div class="ct" style="margin-bottom:.55rem"><div class="ctl"><div class="ctd b"></div>Docker</div></div>
+        <div class="bg">
+          <button class="btn g"  onclick="act('start_docker')">Start</button>
+          <button class="btn r"  onclick="confirm_act('stop_docker','Stop Docker','Stops all containers and the Docker daemon.')">Stop</button>
+          <button class="btn gh" onclick="termAct('docker_ps','Containers')">ps</button>
+          <button class="btn gh" onclick="termAct('docker_images','Images')">images</button>
+          <button class="btn gh" onclick="termAct('docker_stats','Stats')">stats</button>
+        </div>
+      </div>
+      <div class="sep">
+        <div class="ct" style="margin-bottom:.55rem"><div class="ctl"><div class="ctd"></div>Disk</div></div>
+        <div class="bg">
+          <button class="btn g"  onclick="act('mount_disk')">Mount</button>
+          <button class="btn gh" onclick="act('unmount_disk')">Unmount</button>
+          <button class="btn y"  onclick="act('remount_disk')">Remount</button>
+          <button class="btn gh" onclick="termAct('lsblk','Block devices')">lsblk</button>
+          <button class="btn gh" onclick="termAct('df','Disk usage')">df</button>
+        </div>
+      </div>
+    </div>
+    <div class="card aor">
+      <div class="ct"><div class="ctl"><div class="ctd or"></div>Jellyfin</div></div>
+      <div class="bg">
+        <button class="btn g"  onclick="act('start_jellyfin')">Start</button>
+        <button class="btn r"  onclick="act('stop_jellyfin')">Stop</button>
+        <button class="btn y"  onclick="act('restart_jellyfin')">Restart</button>
+        <button class="btn or" onclick="termAct('jellyfin_logs','Jellyfin logs')">Logs</button>
+      </div>
+      <div class="sep">
+        <div class="ct" style="margin-bottom:.55rem"><div class="ctl"><div class="ctd cy"></div>Samba</div></div>
+        <div class="bg">
+          <button class="btn g"  onclick="act('start_samba')">Start</button>
+          <button class="btn r"  onclick="act('stop_samba')">Stop</button>
+          <button class="btn y"  onclick="act('restart_samba')">Restart</button>
+        </div>
+        <div class="bg" style="margin-top:.35rem">
+          <button class="btn cy" onclick="termAct('samba_status','Samba connections')">Status</button>
+          <button class="btn b"  onclick="termAct('samba_config','smb.conf')">smb.conf</button>
+          <button class="btn gh" onclick="termAct('samba_testparm','testparm')">testparm</button>
+        </div>
+      </div>
+      <div class="sep">
+        <div class="ct" style="margin-bottom:.5rem"><div class="ctl"><div class="ctd cy"></div>Active connections</div></div>
+        <div id="smb-conns"><span style="font-size:.64rem;color:var(--tx2)">No active connections</span></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      <div class="card apk">
+        <div class="ct"><div class="ctl"><div class="ctd pk"></div>Wetty and FileBrowser</div></div>
+        <div class="bg">
+          <button class="btn g"  onclick="act('start_wetty')">Start Wetty</button>
+          <button class="btn r"  onclick="act('stop_wetty')">Stop</button>
+          <button class="btn y"  onclick="act('restart_wetty')">Restart</button>
+        </div>
+        <div class="bg" style="margin-top:.35rem">
+          <button class="btn g"  onclick="act('start_filebrowser')">Start FB</button>
+          <button class="btn r"  onclick="act('stop_filebrowser')">Stop</button>
+          <button class="btn y"  onclick="act('restart_filebrowser')">Restart</button>
+        </div>
+        <div class="bg" style="margin-top:.35rem">
+          <button class="btn pk" onclick="switchTab('terminal',document.querySelector('[data-tab=terminal]'))">Open Terminal</button>
+          <button class="btn pk" onclick="switchTab('files',document.querySelector('[data-tab=files]'))">Open FileBrowser</button>
+        </div>
+      </div>
+      <div class="card ar">
+        <div class="ct"><div class="ctl"><div class="ctd r"></div>Power and System</div></div>
+        <div class="bg">
+          <button class="btn y"  onclick="confirm_act('power_save','Power Save','Stops all services and unmounts disk. SSH stays active.')">Power Save</button>
+          <button class="btn cy" onclick="confirm_act('restore_power_save','Restore','Starts Docker, Jellyfin, Samba, Wetty, FileBrowser.')">Restore</button>
+        </div>
+        <div class="bg" style="margin-top:.35rem">
+          <button class="btn gh" onclick="confirm_act('reboot','Safe Reboot','Stops all services cleanly before rebooting.')">Reboot</button>
+          <button class="btn r"  onclick="confirm_act('shutdown','Safe Shutdown','Stops everything cleanly then powers off.')">Shutdown</button>
+        </div>
+        <div class="sep">
+          <div class="bg"><button class="btn gh" onclick="termAct('ping_avistaz','Ping AvistaZ')">Ping VPN</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Logs -->
+<div class="panel" id="panel-logs">
+  <div class="card">
+    <div class="ct">
+      <div class="ctl"><div class="ctd b"></div>Live Logs</div>
+      <button class="btn gh" style="font-size:.56rem;padding:.18rem .48rem" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="ltabs">
+      <button class="lt a" onclick="loadLog('gluetun',this)">Gluetun</button>
+      <button class="lt"   onclick="loadLog('qbittorrent',this)">qBittorrent</button>
+      <button class="lt"   onclick="loadLog('jellyfin',this)">Jellyfin</button>
+      <button class="lt"   onclick="loadLog('wetty',this)">Wetty</button>
+      <button class="lt"   onclick="loadLog('filebrowser',this)">FileBrowser</button>
+      <button class="lt"   onclick="loadLog('samba',this)">Samba</button>
+      <button class="lt"   onclick="loadLog('docker',this)">Docker</button>
+      <button class="lt"   onclick="loadLog('system',this)">Script</button>
+      <button class="lt"   onclick="loadLog('syslog',this)">Syslog</button>
+    </div>
+    <div id="log-out">Select a log tab above...</div>
+  </div>
+</div>
+
+<!-- Terminal -->
+<div class="panel embed" id="panel-terminal">
+  <div class="embed-toolbar">
+    <span class="embed-title">Web Terminal (Wetty)</span>
+    <div class="embed-actions">
+      <span class="bdg" id="wetty-status-badge">checking...</span>
+      <button class="btn g"  onclick="act('start_wetty').then(()=>setTimeout(()=>loadEmbedNow('wetty'),2500))">Start</button>
+      <button class="btn r"  onclick="act('stop_wetty')">Stop</button>
+      <a class="btn pk" id="wetty-newwin" href="#" target="_blank" rel="noopener">New window</a>
+      <button class="btn gh" onclick="reloadEmbed('wetty-frame')">Reload</button>
+    </div>
+  </div>
+  <iframe id="wetty-frame" class="embed-frame" src="about:blank" allowfullscreen></iframe>
+  <div class="embed-offline" id="wetty-offline">
+    <div class="oi">[ ]</div>
+    <p>Wetty is not running.<br>Click <strong>Start</strong> above to launch it.</p>
+  </div>
+</div>
+
+<!-- FileBrowser -->
+<div class="panel embed" id="panel-files">
+  <div class="embed-toolbar">
+    <span class="embed-title">File Manager (FileBrowser)</span>
+    <div class="embed-actions">
+      <span class="bdg" id="fb-status-badge">checking...</span>
+      <button class="btn g"  onclick="act('start_filebrowser').then(()=>setTimeout(()=>loadEmbedNow('fb'),2500))">Start</button>
+      <button class="btn r"  onclick="act('stop_filebrowser')">Stop</button>
+      <a class="btn pk" id="fb-newwin" href="#" target="_blank" rel="noopener">New window</a>
+      <button class="btn gh" onclick="reloadEmbed('fb-frame')">Reload</button>
+    </div>
+  </div>
+  <iframe id="fb-frame" class="embed-frame" src="about:blank" allowfullscreen></iframe>
+  <div class="embed-offline" id="fb-offline">
+    <div class="oi">[ ]</div>
+    <p>FileBrowser is not running.<br>Click <strong>Start</strong> above to launch it.</p>
+  </div>
+</div>
+
+<!-- Jellyfin -->
+<div class="panel embed" id="panel-jellyfin">
+  <div class="embed-toolbar">
+    <span class="embed-title">Jellyfin</span>
+    <div class="embed-actions">
+      <span class="bdg" id="jf-status-badge">checking...</span>
+      <button class="btn g"  onclick="act('start_jellyfin').then(()=>setTimeout(()=>loadEmbedNow('jf'),2500))">Start</button>
+      <button class="btn r"  onclick="act('stop_jellyfin')">Stop</button>
+      <a class="btn or" id="jf-newwin" href="#" target="_blank" rel="noopener">New window</a>
+      <button class="btn gh" onclick="reloadEmbed('jf-frame')">Reload</button>
+    </div>
+  </div>
+  <iframe id="jf-frame" class="embed-frame" src="about:blank" allowfullscreen></iframe>
+  <div class="embed-offline" id="jf-offline">
+    <div class="oi">[ ]</div>
+    <p>Jellyfin is not running.<br>Click <strong>Start</strong> above to launch it.</p>
+  </div>
+</div>
+
+<!-- Downloads -->
+<div class="panel" id="panel-downloads">
+  <div id="path-modal">
+    <div class="pbox">
+      <div class="pbox-hdr">
+        <span class="pbox-title">Choose Download Folder</span>
+        <button class="ico" onclick="closePath()">X</button>
+      </div>
+      <div class="pbox-path" id="pbox-path">/mnt/exstore</div>
+      <div class="pbox-list" id="pbox-list"></div>
+      <div class="pbox-footer">
+        <button class="btn gh" onclick="closePath()">Cancel</button>
+        <button class="btn g"  onclick="selectCurrentPath()">Use this folder</button>
+      </div>
+    </div>
+  </div>
+  <div class="dl-form">
+    <div class="ct" style="margin-bottom:.75rem">
+      <div class="ctl"><div class="ctd y"></div>New Download</div>
+      <button class="btn gh" style="font-size:.56rem" onclick="checkTools()">Check tools</button>
+    </div>
+    <label class="dl-label">URL(s) - one per line (GoFile and PixelDrain supported via download.sh)</label>
+    <textarea class="dl-textarea" id="dl-urls" placeholder="https://example.com/file.mp4&#10;https://youtube.com/watch?v=...&#10;magnet:?xt=urn:btih:..."></textarea>
+    <div class="dl-row">
+      <div style="display:flex;flex-direction:column;gap:.35rem;flex:1;min-width:200px">
+        <label class="dl-label" style="margin-bottom:0">Destination folder</label>
+        <div style="display:flex;gap:.4rem;align-items:center">
+          <select class="dl-select" id="dl-dest-select" onchange="onDestSelect(this)" style="flex:1">
+            <option value="">Loading folders...</option>
+          </select>
+          <button class="btn gh" onclick="openPathBrowser()" title="Browse">Browse</button>
+        </div>
+        <input class="dl-input" id="dl-custom-dest" placeholder="Or type custom path: /mnt/exstore/MyFolder" oninput="onCustomDest(this)">
+        <div class="dl-path-display" id="dl-path-display"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.35rem">
+        <label class="dl-label" style="margin-bottom:0">Method</label>
+        <select class="dl-select" id="dl-method">
+          <option value="auto">Auto (yt-dlp then aria2c then wget)</option>
+          <option value="ytdlp">yt-dlp only</option>
+          <option value="direct">Direct (aria2c then wget then curl)</option>
+          <option value="aria2c">aria2c only</option>
+          <option value="wget">wget only</option>
+          <option value="curl">curl only</option>
+        </select>
+      </div>
+    </div>
+    <div class="bg" style="margin-top:.8rem">
+      <button class="btn g" onclick="startDownload()">Start Download</button>
+      <button class="btn gh" onclick="$('dl-urls').value=''">Clear URLs</button>
+    </div>
+    <div id="tools-status" style="display:none;margin-top:.8rem;padding:.65rem .85rem;background:var(--bg3);border:1px solid var(--bdr);border-radius:8px;font-size:.66rem;line-height:1.85"></div>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.65rem">
+    <div class="ct" style="margin-bottom:0"><div class="ctl"><div class="ctd b"></div>Download Queue</div></div>
+    <div style="display:flex;gap:.38rem">
+      <button class="btn gh" onclick="refreshJobs()" style="font-size:.6rem">Refresh</button>
+      <button class="btn gh" onclick="clearDoneJobs()" style="font-size:.6rem">Clear done</button>
+    </div>
+  </div>
+  <div id="jobs-list"><div style="font-size:.72rem;color:var(--tx2);text-align:center;padding:2rem">No downloads yet</div></div>
+</div>
+
+<!-- File Manager -->
+<div class="panel" id="panel-filemgr">
+  <div class="card">
+    <div class="ct">
+      <div class="ctl"><div class="ctd cy"></div>File Manager</div>
+      <div style="display:flex;gap:.35rem">
+        <button class="btn gh" style="font-size:.58rem;padding:.2rem .5rem" onclick="fmUp()">Up</button>
+        <button class="btn gh" style="font-size:.58rem;padding:.2rem .5rem" onclick="loadFM()">Refresh</button>
+      </div>
+    </div>
+    <div class="fm-toolbar">
+      <div class="fm-path" id="fm-path">/mnt/exstore</div>
+      <input type="text" id="fm-goto" class="dl-input" placeholder="Go to path..."
+             style="min-width:unset;width:180px;flex:unset;font-size:.66rem;padding:.3rem .6rem"
+             onkeydown="if(event.key==='Enter')fmGoto()">
+      <button class="btn cy" style="font-size:.62rem;padding:.3rem .6rem" onclick="fmGoto()">Go</button>
+    </div>
+    <div id="fm-list" style="min-height:120px"><div style="color:var(--tx2);font-size:.72rem;padding:.5rem">Loading...</div></div>
+  </div>
+</div>
+
+<!-- Command Runner -->
+<div class="panel" id="panel-runner">
+  <div class="card">
+    <div class="ct">
+      <div class="ctl"><div class="ctd or"></div>Run Linux Command</div>
+      <div style="display:flex;gap:.35rem">
+        <button class="btn gh" style="font-size:.58rem;padding:.2rem .5rem" onclick="clearRunner()">Clear</button>
+        <button class="btn r"  style="font-size:.58rem;padding:.2rem .5rem;display:none" id="runner-kill-btn" onclick="killRunner()">Stop</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;margin-bottom:.7rem;flex-wrap:wrap">
+      <input type="text" id="runner-cmd" class="dl-input"
+             placeholder="e.g.  df -h  |  docker ps  |  yt-dlp --version  |  ls /mnt/exstore"
+             style="flex:1;min-width:0;font-size:.75rem"
+             onkeydown="if(event.key==='Enter')runCommand()">
+      <button class="btn or" onclick="runCommand()" id="runner-run-btn">Run</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.7rem" id="runner-chips"></div>
+    <div id="runner-out"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:.4rem">
+      <span id="runner-status" style="font-size:.6rem;color:var(--tx3)">Ready</span>
+      <button class="btn gh" style="font-size:.56rem;padding:.18rem .48rem" onclick="copyRunnerOut()">Copy</button>
+    </div>
+  </div>
+  <div class="card" style="margin-top:.9rem">
+    <div class="ct">
+      <div class="ctl"><div class="ctd or"></div>Command History</div>
+      <button class="btn gh" style="font-size:.56rem;padding:.18rem .48rem" onclick="clearRunnerHistory()">Clear</button>
+    </div>
+    <div id="runner-history" style="font-size:.68rem;color:var(--tx2)">No commands run yet</div>
+  </div>
+</div>
+
+</div><!-- /panels -->
+</div><!-- /shell -->
+
+<script>
+{%- raw %}
+// =========================================================================
+// Theme
+// =========================================================================
+var TK = 'sb-theme';
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  $('theme-btn').textContent = t === 'dark' ? 'Light' : 'Dark';
+  localStorage.setItem(TK, t);
+}
+function toggleTheme() {
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+}
+applyTheme(localStorage.getItem(TK) || 'dark');
+
+// =========================================================================
+// Helpers
+// =========================================================================
+function $(id) { return document.getElementById(id); }
+function setDot(id, s) { var e = $(id); if (e) e.className = 'dot ' + s; }
+function setBdg(id, txt, s) { var e = $(id); if (e) { e.textContent = txt; e.className = 'bdg ' + s; } }
+function setTxt(id, v, cls) {
+  var e = $(id); if (!e) return;
+  e.textContent = v;
+  if (cls) e.className = e.className.replace(/\b(g|r|y|cy|b|pu|or|pk)\b/g, '').trim() + ' ' + cls;
+}
+function cc(p) { return p >= 85 ? 'r' : p >= 60 ? 'y' : 'g'; }
+function fmtKB(kb) { return kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB/s' : kb.toFixed(1) + ' KB/s'; }
+function fmtGB(gb) { return gb >= 1 ? gb.toFixed(2) + ' GB' : ((gb || 0) * 1024).toFixed(0) + ' MB'; }
+
+// =========================================================================
+// Mobile nav
+// =========================================================================
+function toggleMenu() {
+  var tabs = $('nav-tabs');
+  tabs.classList.toggle('open');
+  $('menu-btn').textContent = tabs.classList.contains('open') ? 'X' : '\u2630';
+}
+document.addEventListener('click', function(e) {
+  var tabs = $('nav-tabs');
+  if (tabs.classList.contains('open') && !tabs.contains(e.target) && e.target !== $('menu-btn')) {
+    tabs.classList.remove('open');
+    $('menu-btn').textContent = '\u2630';
+  }
+});
+
+// =========================================================================
+// Tab switching
+// =========================================================================
+function switchTab(id, btn) {
+  document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
+  document.querySelectorAll('.ntab').forEach(function(t) { t.classList.remove('active'); });
+  $('panel-' + id).classList.add('active');
+  if (btn) btn.classList.add('active');
+  $('nav-tabs').classList.remove('open');
+  $('menu-btn').textContent = '\u2630';
+  // Load embed iframes on first visit
+  var prefixMap = {terminal: 'wetty', files: 'fb', jellyfin: 'jf'};
+  var prefix = prefixMap[id];
+  if (prefix) {
+    var frame = $(prefix + '-frame');
+    if (frame && frame.src === 'about:blank' && _embedUrls[prefix]) {
+      frame.src = _embedUrls[prefix];
+      $(prefix + '-offline').style.display = 'none';
+    }
+  }
+}
+
+// =========================================================================
+// Toast
+// =========================================================================
+function toast(msg, type, ms) {
+  type = type || 'info'; ms = ms || 5500;
+  var el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  el.onclick = function() { el.remove(); };
+  $('tc').appendChild(el);
+  setTimeout(function() { el.remove(); }, ms);
+}
+
+// =========================================================================
+// Confirm modal
+// =========================================================================
+var _pend = null;
+function confirm_act(a, title, body) {
+  _pend = a;
+  $('m-title').textContent = title;
+  $('m-body').textContent = body;
+  $('modal').classList.add('show');
+}
+function closeModal() { $('modal').classList.remove('show'); _pend = null; }
+$('m-ok').onclick = function() { if (_pend) { act(_pend); closeModal(); } };
+$('modal').onclick = function(e) { if (e.target === $('modal')) closeModal(); };
+
+// =========================================================================
+// Output modal
+// =========================================================================
+function termAct(action, title) {
+  $('term-title').textContent = title;
+  $('term-body').textContent = 'Loading...';
+  $('term-modal').classList.add('show');
+  fetch('/api/action', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: action})})
+    .then(function(r) { return r.json(); })
+    .then(function(d) { $('term-body').textContent = d.msg || (d.ok ? 'Done' : 'No output'); })
+    .catch(function(e) { $('term-body').textContent = 'Error: ' + e.message; });
+}
+function closeTerm() { $('term-modal').classList.remove('show'); }
+function copyTermOutput() {
+  navigator.clipboard && navigator.clipboard.writeText($('term-body').textContent)
+    .then(function() { toast('Copied!', 'ok', 2000); })
+    .catch(function() { toast('Copy failed', 'err'); });
+}
+$('term-modal').onclick = function(e) { if (e.target === $('term-modal')) closeTerm(); };
+
+// =========================================================================
+// Action
+// =========================================================================
+function act(action) {
+  toast(action.replace(/_/g, ' ') + '...', 'info', 20000);
+  return fetch('/api/action', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: action})})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      document.querySelectorAll('.toast.info').forEach(function(t) { t.remove(); });
+      toast(d.msg, d.ok ? 'ok' : 'err', 7000);
+      if (d.ok) setTimeout(fetchStatus, 3500);
+      return d;
+    })
+    .catch(function(e) {
+      document.querySelectorAll('.toast.info').forEach(function(t) { t.remove(); });
+      toast('Request failed: ' + e.message, 'err');
+      return {ok: false};
+    });
+}
+
+// =========================================================================
+// Embed helpers
+// =========================================================================
+var _embedUrls = {wetty: '', fb: '', jf: ''};
+
+function loadEmbedNow(prefix) {
+  var url = _embedUrls[prefix];
+  if (!url) return;
+  var frame = $(prefix + '-frame');
+  var offline = $(prefix + '-offline');
+  if (frame) { frame.style.display = 'block'; frame.src = url; }
+  if (offline) offline.style.display = 'none';
+}
+
+function reloadEmbed(frameId) {
+  var f = $(frameId);
+  if (f && f.src && f.src !== 'about:blank') {
+    var src = f.src; f.src = 'about:blank';
+    setTimeout(function() { f.src = src; }, 100);
+  }
+}
+
+function setEmbedState(prefix, running, url) {
+  _embedUrls[prefix] = url;
+  var frame = $(prefix + '-frame');
+  var offline = $(prefix + '-offline');
+  var badge = $(prefix + '-status-badge');
+  var newwin = $(prefix + '-newwin');
+  var panelId = prefix === 'wetty' ? 'terminal' : prefix === 'fb' ? 'files' : 'jellyfin';
+  var panel = $('panel-' + panelId);
+  if (running && url) {
+    if (frame) frame.style.display = 'block';
+    if (offline) offline.style.display = 'none';
+    if (panel && panel.classList.contains('active') && frame && frame.src === 'about:blank') {
+      frame.src = url;
+    }
+    if (newwin) newwin.href = url;
+    if (badge) { badge.textContent = 'Running'; badge.className = 'bdg g'; }
+  } else {
+    if (frame) { frame.style.display = 'none'; frame.src = 'about:blank'; }
+    if (offline) offline.style.display = 'flex';
+    if (badge) { badge.textContent = 'Stopped'; badge.className = 'bdg r'; }
+  }
+}
+
+// =========================================================================
+// Status render
+// =========================================================================
+function render(s) {
+  setDot('d-gl', s.gluetun ? 'g' : 'r');     setBdg('b-gl', s.gluetun ? 'Running' : 'Stopped', s.gluetun ? 'g' : 'r');
+  setDot('d-qb', s.qbittorrent ? 'g' : 'r'); setBdg('b-qb', s.qbittorrent ? 'Running' : 'Stopped', s.qbittorrent ? 'g' : 'r');
+  setDot('d-jf', s.jellyfin ? 'g' : 'r');    setBdg('b-jf', s.jellyfin ? 'Running' : 'Stopped', s.jellyfin ? 'g' : 'r');
+  setDot('d-sm', s.samba ? 'g' : 'r');       setBdg('b-sm', s.samba ? 'Running' : 'Stopped', s.samba ? 'g' : 'r');
+  setDot('d-wt', s.wetty ? 'g' : 'r');       setBdg('b-wt', s.wetty ? 'Running' : 'Stopped', s.wetty ? 'g' : 'r');
+  setDot('d-fb', s.filebrowser ? 'g' : 'r'); setBdg('b-fb', s.filebrowser ? 'Running' : 'Stopped', s.filebrowser ? 'g' : 'r');
+  setDot('d-dk', s.docker ? 'g' : 'r');      setBdg('b-dk', s.docker ? 'Running' : 'Stopped', s.docker ? 'g' : 'r');
+  setDot('d-ds', s.disk_mounted ? 'g' : 'r');setBdg('b-ds', s.disk_mounted ? 'Mounted' : 'Unmounted', s.disk_mounted ? 'g' : 'r');
+
+  var nd = $('nt-dash');
+  if (nd) nd.className = 'ndot ' + (s.gluetun && s.qbittorrent && s.docker ? 'g' : 'r');
+  var nw = $('nt-wetty'); if (nw) nw.className = 'ndot ' + (s.wetty ? 'g' : 'r');
+  var nf = $('nt-fb');    if (nf) nf.className = 'ndot ' + (s.filebrowser ? 'g' : 'r');
+  var nj = $('nt-jf');    if (nj) nj.className = 'ndot ' + (s.jellyfin ? 'g' : 'r');
+
+  var allOk = s.gluetun && s.qbittorrent && s.jellyfin && s.samba && s.wetty && s.filebrowser && s.docker;
+  var someOk = s.gluetun || s.qbittorrent || s.jellyfin || s.samba;
+  var p = $('h-pill');
+  p.textContent = allOk ? 'all systems go' : someOk ? 'partial' : 'down';
+  p.className = allOk ? 'pill' : someOk ? 'pill warn' : 'pill bad';
+
+  setTxt('n-lip', s.local_ip || '--', 'y');
+  setTxt('n-hip', s.home_ip || '--');
+  setTxt('n-aip', s.avistaz_ip || '--', 'cy');
+  setTxt('n-up', s.uptime || '--');
+  if (s.net) { setTxt('n-rx', fmtKB(s.net.rx_kb), 'g'); setTxt('n-tx', fmtKB(s.net.tx_kb), 'y'); }
+  if (s.disk_io) { setTxt('s-dr', fmtKB(s.disk_io.read_kb), 'g'); setTxt('s-dw', fmtKB(s.disk_io.write_kb), 'y'); }
+
+  var ve = $('n-vip'), vb = $('n-vbdg');
+  ve.textContent = s.vpn_ip || (s.qbittorrent ? 'connecting...' : 'n/a');
+  if (s.ip_status === 'ok')       { ve.className = 'vv g'; vb.textContent = 'AvistaZ OK'; vb.className = 'bdg g'; }
+  else if (s.ip_status === 'leak'){ ve.className = 'vv r'; vb.textContent = 'LEAK!'; vb.className = 'bdg r'; }
+  else if (s.ip_status === 'mismatch') { ve.className = 'vv y'; vb.textContent = 'Mismatch'; vb.className = 'bdg y'; }
+  else { ve.className = 'vv'; vb.textContent = ''; vb.className = ''; }
+
+  if (s.disk_mounted && s.disk && s.disk.used) {
+    $('disk-row').style.display = 'flex';
+    setTxt('n-disk', s.disk.used + '/' + s.disk.size + ' (' + s.disk.pct + ')');
+  }
+
+  var ccpu = cc(s.cpu); $('s-cpu').textContent = s.cpu + '%'; $('s-cpu').className = 'bsv ' + ccpu;
+  $('pb-cpu').style.width = Math.min(s.cpu, 100) + '%'; $('pb-cpu').className = 'barf ' + ccpu;
+
+  if (s.ram && s.ram.total) {
+    var cr = cc(s.ram.pct); $('s-ram').textContent = s.ram.pct + '%'; $('s-ram').className = 'bsv ' + cr;
+    setTxt('s-ram-s', s.ram.used + '/' + s.ram.total + ' MB');
+    $('pb-ram').style.width = Math.min(s.ram.pct, 100) + '%'; $('pb-ram').className = 'barf ' + cr;
+  }
+
+  if (s.swap) {
+    if (s.swap.total > 0) {
+      $('s-swap').textContent = s.swap.pct + '%';
+      setTxt('s-swap-s', s.swap.used + '/' + s.swap.total + ' MB');
+      $('pb-swap').style.width = Math.min(s.swap.pct, 100) + '%';
+    } else {
+      $('s-swap').textContent = 'n/a'; setTxt('s-swap-s', 'no swap');
+    }
+  }
+
+  var lp = (s.load || '').split(' '); var l1 = parseFloat(lp[0]) || 0; var nc = parseInt(s.cores) || 1;
+  var lc = l1 >= nc ? 'r' : l1 >= nc * .7 ? 'y' : 'g';
+  $('s-load').textContent = s.load || '--'; $('s-load').className = 'bsv ' + lc;
+  setTxt('s-cores', (s.cores || '?') + ' cores');
+
+  var tg = $('tg');
+  if (s.temps && Object.keys(s.temps).length) {
+    tg.innerHTML = Object.entries(s.temps).map(function(kv) {
+      var n = kv[0], v = kv[1]; var c = v >= 80 ? 'r' : v >= 60 ? 'y' : 'g';
+      return '<div class="tc"><span class="tv ' + c + '">' + v + 'C</span><span class="tn">' + n + '</span></div>';
+    }).join('');
+  } else {
+    tg.innerHTML = '<span style="font-size:.62rem;color:var(--tx2)">no sensors</span>';
+  }
+
+  var sc = s.smb_connections || [];
+  $('s-smb').textContent = sc.length;
+  $('s-smb-sh').textContent = (s.smb_shares || 0) + ' share' + (s.smb_shares !== 1 ? 's' : '') + ' configured';
+  $('smb-conns').innerHTML = sc.length
+    ? sc.map(function(c) { return '<div class="conn"><div class="conn-ic">S</div><div><div style="font-size:.7rem;color:var(--tx)">' + c.machine + '</div><div style="font-size:.6rem;color:var(--tx2)">PID ' + c.pid + ' - ' + c.user + '</div></div></div>'; }).join('')
+    : '<span style="font-size:.64rem;color:var(--tx2)">No active connections</span>';
+
+  var jfstat = $('jf-stat'), jflink = $('jf-link');
+  if (s.jellyfin && s.local_ip) {
+    var url = 'http://' + s.local_ip + ':' + s.jellyfin_port;
+    jfstat.innerHTML = '<span style="color:var(--gr)">Running</span><br><span style="font-size:.6rem;color:var(--tx2)">' + url + '</span>';
+    jflink.href = url; jflink.style.display = 'inline-flex';
+  } else {
+    jfstat.innerHTML = '<span style="color:var(--rd)">Stopped</span>'; jflink.style.display = 'none';
+  }
+
+  if (s.qbit_stats && s.qbittorrent) {
+    var q = s.qbit_stats; $('qb-live').style.display = 'inline';
+    setTxt('q-total', q.total != null ? q.total : '--');
+    setTxt('q-dl', q.downloading != null ? q.downloading : '--');
+    setTxt('q-seed', q.seeding != null ? q.seeding : '--');
+    setTxt('q-paused', q.paused != null ? q.paused : '--');
+    setTxt('q-err', q.errored != null ? q.errored : '--');
+    setTxt('q-dlspd', fmtKB(q.dl_speed_kb || 0));
+    setTxt('q-ulspd', fmtKB(q.ul_speed_kb || 0));
+    setTxt('q-dltot', fmtGB(q.dl_total_gb || 0));
+    setTxt('q-ultot', fmtGB(q.ul_total_gb || 0));
+  } else {
+    $('qb-live').style.display = 'none';
+    ['q-total','q-dl','q-seed','q-paused','q-err','q-dlspd','q-ulspd','q-dltot','q-ultot']
+      .forEach(function(id) { setTxt(id, s.qbittorrent ? '--' : 'n/a'); });
+  }
+
+  var ql = $('qlinks');
+  if (s.local_ip) {
+    var links = '';
+    if (s.qbittorrent) links += '<a class="btn b" href="http://' + s.local_ip + ':' + s.webui_port + '" target="_blank" rel="noopener">qBit</a>';
+    if (s.jellyfin)    links += '<a class="btn or" href="http://' + s.local_ip + ':' + s.jellyfin_port + '" target="_blank" rel="noopener">Jellyfin</a>';
+    if (s.wetty)       links += '<a class="btn pk" href="http://' + s.local_ip + ':' + s.wetty_port + '" target="_blank" rel="noopener">Terminal</a>';
+    if (s.filebrowser) links += '<a class="btn cy" href="http://' + s.local_ip + ':' + s.filebrowser_port + '" target="_blank" rel="noopener">FileBrowser</a>';
+    ql.innerHTML = links || '<span style="font-size:.62rem;color:var(--tx2)">Start services for links</span>';
+  }
+
+  if (s.local_ip) {
+    setEmbedState('wetty', s.wetty,       'http://' + s.local_ip + ':' + s.wetty_port);
+    setEmbedState('fb',    s.filebrowser, 'http://' + s.local_ip + ':' + s.filebrowser_port);
+    setEmbedState('jf',    s.jellyfin,    'http://' + s.local_ip + ':' + s.jellyfin_port);
+    if ($('wetty-newwin')) $('wetty-newwin').href = 'http://' + s.local_ip + ':' + s.wetty_port;
+    if ($('fb-newwin'))    $('fb-newwin').href    = 'http://' + s.local_ip + ':' + s.filebrowser_port;
+    if ($('jf-newwin'))    $('jf-newwin').href    = 'http://' + s.local_ip + ':' + s.jellyfin_port;
+  }
+
+  $('hts').textContent = 'updated ' + new Date().toLocaleTimeString();
+}
+
+function fetchStatus() {
+  $('rfr').classList.add('spin');
+  fetch('/api/status')
+    .then(function(r) { return r.json(); })
+    .then(function(d) { render(d); })
+    .catch(function() { toast('Cannot reach server', 'err'); })
+    .finally(function() { $('rfr').classList.remove('spin'); });
+}
+
+function fetchProcs() {
+  fetch('/api/processes')
+    .then(function(r) { return r.json(); })
+    .then(function(ps) {
+      var tb = $('proc-body');
+      if (!ps.length) { tb.innerHTML = '<tr><td colspan="6" style="color:var(--tx2)">No data</td></tr>'; return; }
+      tb.innerHTML = ps.map(function(p) {
+        var m = parseFloat(p.mem) || 0; var c = parseFloat(p.cpu) || 0;
+        var mc = m >= 20 ? 'var(--rd)' : m >= 10 ? 'var(--yl)' : 'var(--tx)';
+        var cc2 = c >= 50 ? 'var(--rd)' : c >= 20 ? 'var(--yl)' : 'var(--tx)';
+        return '<tr><td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + p.name + '">' + p.name + '</td>'
+          + '<td style="color:var(--tx2)">' + p.pid + '</td>'
+          + '<td style="color:' + mc + '">' + p.mem + '%</td>'
+          + '<td style="color:' + cc2 + '">' + p.cpu + '%</td>'
+          + '<td style="color:var(--tx3)">' + (p.time || '--') + '</td>'
+          + '<td><button class="kill-btn" onclick="killProc(\'' + p.pid + '\',\'' + p.name + '\')">TERM</button></td></tr>';
+      }).join('');
+    })
+    .catch(function() {});
+}
+
+function killProc(pid, name) {
+  if (!confirm('Send TERM to ' + name + ' (PID ' + pid + ')?')) return;
+  fetch('/api/kill_process', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({pid: pid, signal: 'TERM'})})
+    .then(function(r) { return r.json(); })
+    .then(function(d) { toast(d.msg, d.ok ? 'ok' : 'err'); if (d.ok) setTimeout(fetchProcs, 1500); })
+    .catch(function(e) { toast('Kill failed: ' + e.message, 'err'); });
+}
+
+// =========================================================================
+// Logs
+// =========================================================================
+var _es = null;
+function loadLog(src, tabEl) {
+  document.querySelectorAll('.lt').forEach(function(t) { t.classList.remove('a'); });
+  tabEl.classList.add('a');
+  var out = $('log-out'); out.textContent = 'Loading...';
+  if (_es) { _es.close(); _es = null; }
+  var lines = [];
+  var es = new EventSource('/api/logs/' + src); _es = es;
+  es.onmessage = function(e) {
+    var data; try { data = JSON.parse(e.data); } catch(ex) { return; }
+    if (data === '__DONE__') { es.close(); _es = null; return; }
+    lines.push(data); if (lines.length > 150) lines.shift();
+    out.textContent = lines.join('\n'); out.scrollTop = out.scrollHeight;
+  };
+  es.onerror = function() { if (es.readyState === 2) { es.close(); _es = null; } };
+}
+function clearLog() { $('log-out').textContent = ''; if (_es) { _es.close(); _es = null; } }
+
+fetchStatus(); fetchProcs();
+setInterval(fetchStatus, 15000);
+setInterval(fetchProcs, 30000);
+
+// =========================================================================
+// Download Manager
+// =========================================================================
+var _selectedPath = '/mnt/exstore';
+var _jobStreams = {};
+
+function loadDirs() {
+  fetch('/api/download/dirs')
+    .then(function(r) { return r.json(); })
+    .then(function(dirs) {
+      var sel = $('dl-dest-select');
+      sel.innerHTML = dirs.map(function(d) { return '<option value="' + d.path + '">' + d.label + '</option>'; }).join('');
+      if (dirs.length) { _selectedPath = dirs[0].path; updatePathDisplay(); }
+    })
+    .catch(function(e) { console.warn('Could not load dirs', e); });
+}
+function onDestSelect(sel) {
+  if (!sel.value) return;
+  _selectedPath = sel.value; $('dl-custom-dest').value = ''; updatePathDisplay();
+}
+function onCustomDest(inp) {
+  if (inp.value.trim()) { _selectedPath = inp.value.trim(); $('dl-dest-select').value = ''; updatePathDisplay(); }
+}
+function updatePathDisplay() {
+  var d = $('dl-path-display'); d.textContent = '-> ' + _selectedPath; d.style.display = 'block';
+}
+
+var _pbc = '/mnt/exstore';
+function openPathBrowser() { $('path-modal').classList.add('show'); browseDir('/mnt/exstore'); }
+function closePath() { $('path-modal').classList.remove('show'); }
+function browseDir(path) {
+  _pbc = path; $('pbox-path').textContent = path;
+  $('pbox-list').innerHTML = '<div style="padding:1rem;color:var(--tx2);font-size:.72rem">Loading...</div>';
+  fetch('/api/download/browse?path=' + encodeURIComponent(path))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { $('pbox-list').innerHTML = '<div style="padding:1rem;color:var(--rd);font-size:.72rem">' + data.error + '</div>'; return; }
+      if (!data.entries.length) { $('pbox-list').innerHTML = '<div style="padding:1rem;color:var(--tx2);font-size:.72rem">Empty directory</div>'; return; }
+      $('pbox-list').innerHTML = data.entries.map(function(e) {
+        var safePath = e.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        return '<div class="pentry" onclick="browseDir(\'' + safePath + '\')">' + (e.name === '..' ? 'Up' : '') + ' ' + e.name + '</div>';
+      }).join('');
+    })
+    .catch(function(e) { $('pbox-list').innerHTML = '<div style="padding:1rem;color:var(--rd);font-size:.72rem">Error: ' + e.message + '</div>'; });
+}
+function selectCurrentPath() {
+  _selectedPath = _pbc; $('dl-dest-select').value = ''; $('dl-custom-dest').value = '';
+  updatePathDisplay(); closePath(); toast('Folder set: ' + _selectedPath, 'ok', 3000);
+}
+$('path-modal').onclick = function(e) { if (e.target === $('path-modal')) closePath(); };
+
+function checkTools() {
+  var el = $('tools-status'); el.style.display = 'block'; el.textContent = 'Checking tools...';
+  fetch('/api/download/tools')
+    .then(function(r) { return r.json(); })
+    .then(function(tools) {
+      el.innerHTML = Object.entries(tools).map(function(kv) {
+        return '<span style="margin-right:1rem;color:' + (kv[1] ? 'var(--gr)' : 'var(--rd)') + '">' + (kv[1] ? 'OK' : 'MISSING') + ' ' + kv[0] + '</span>';
+      }).join('');
+    })
+    .catch(function(e) { el.textContent = 'Error: ' + e.message; });
+}
+
+function startDownload() {
+  var urls_raw = $('dl-urls').value.trim();
+  var custom_dest = $('dl-custom-dest').value.trim();
+  var method = $('dl-method').value;
+  var dest = custom_dest || _selectedPath;
+  if (!urls_raw) { toast('Please enter at least one URL', 'err'); return; }
+  if (!dest) { toast('Please select a destination folder', 'err'); return; }
+  var urls = urls_raw.split('\n').map(function(u) { return u.trim(); }).filter(Boolean);
+  toast('Starting ' + urls.length + ' download(s)...', 'info', 5000);
+  fetch('/api/download/start', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({urls: urls, dest: dest, method: method, custom_dest: custom_dest})})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      document.querySelectorAll('.toast.info').forEach(function(t) { t.remove(); });
+      if (d.ok) {
+        toast('Job ' + d.job_id + ' started!', 'ok');
+        $('dl-urls').value = '';
+        switchTab('downloads', document.querySelector('[data-tab=downloads]'));
+        refreshJobs().then(function() { streamJobOutput(d.job_id); });
+      } else { toast(d.msg, 'err'); }
+    })
+    .catch(function(e) {
+      document.querySelectorAll('.toast.info').forEach(function(t) { t.remove(); });
+      toast('Error: ' + e.message, 'err');
+    });
+}
+
+function statusColor(s) {
+  return {running:'var(--gr)',done:'var(--bl)',failed:'var(--rd)',partial:'var(--yl)',queued:'var(--pu)',cancelled:'var(--tx2)'}[s] || 'var(--tx2)';
+}
+function statusIcon(s) {
+  return {running:'>>',done:'OK',failed:'XX',partial:'!!',queued:'...',cancelled:'--'}[s] || '?';
+}
+
+function renderJob(j) {
+  var running = j.status === 'running';
+  var done = ['done','failed','cancelled','partial'].indexOf(j.status) >= 0;
+  var color = statusColor(j.status);
+  var icon = statusIcon(j.status);
+  var pct = j.progress && j.progress.pct != null ? j.progress.pct : null;
+  var speed = (j.progress && j.progress.speed) || '';
+  var eta = (j.progress && j.progress.eta) || '';
+  var size = (j.progress && j.progress.size) || '';
+
+  var progBar = (running && pct !== null) ?
+    '<div style="margin:.55rem 0 .3rem">'
+    + '<div style="display:flex;justify-content:space-between;margin-bottom:.3rem">'
+    + '<span style="font-size:.66rem;color:var(--gr);font-weight:600">' + pct.toFixed(1) + '%</span>'
+    + '<span style="font-size:.6rem;color:var(--tx2)">' + [speed,size,eta?'ETA '+eta:''].filter(Boolean).join(' - ') + '</span>'
+    + '</div>'
+    + '<div style="height:5px;background:var(--bg3);border-radius:3px;overflow:hidden">'
+    + '<div style="height:100%;width:' + Math.min(pct,100) + '%;background:var(--gr);border-radius:3px;transition:width .4s ease"></div>'
+    + '</div></div>' : '';
+
+  var spinBar = (running && pct === null) ?
+    '<div style="margin:.45rem 0 .25rem;height:3px;background:var(--bg3);border-radius:3px;overflow:hidden">'
+    + '<div style="height:100%;width:40%;background:var(--gr);border-radius:3px;animation:pulsebar 1.4s ease-in-out infinite"></div>'
+    + '</div>' : '';
+
+  var urlList = j.urls.slice(0,2).map(function(u) {
+    return '<div style="font-size:.6rem;color:var(--tx3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + u + '">' + u + '</div>';
+  }).join('') + (j.urls.length > 2 ? '<div style="font-size:.58rem;color:var(--tx3)">+' + (j.urls.length-2) + ' more URL(s)</div>' : '');
+
+  var activity = running && j.current_cmd
+    ? '<div style="font-size:.64rem;color:var(--cy);margin:.22rem 0">>> ' + j.current_cmd + (j.total > 1 ? ' [' + j.current_idx + '/' + j.total + ']' : '') + '</div>' : '';
+
+  var vFiles = (j.verified_files && j.verified_files.length)
+    ? '<div style="margin-top:.4rem">' + j.verified_files.slice(0,5).map(function(f) {
+        return '<div style="font-size:.64rem;color:var(--gr)">  ' + f[0] + ' <span style="color:var(--tx2)">(' + f[1] + ')</span></div>';
+      }).join('') + '</div>' : '';
+
+  var failed = (j.failed_urls && j.failed_urls.length)
+    ? '<div style="font-size:.62rem;color:var(--rd);margin-top:.28rem">FAILED: ' + j.failed_urls.length + ' URL(s)</div>' : '';
+
+  return '<div class="job-card ' + j.status + '" id="job-' + j.id + '" style="border-left:3px solid ' + color + '">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.52rem;gap:.5rem;flex-wrap:wrap">'
+    + '<div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap">'
+    + '<span style="color:' + color + ';font-size:.7rem;font-weight:700">' + icon + ' ' + j.status.toUpperCase() + '</span>'
+    + '<span style="font-size:.6rem;color:var(--tx3);background:var(--bg3);padding:.08rem .42rem;border-radius:4px">job:' + j.id + '</span>'
+    + (j.started ? '<span style="font-size:.56rem;color:var(--tx3)">' + j.started + (j.finished ? '->' + j.finished : running ? '...' : '') + '</span>' : '')
+    + '</div>'
+    + '<div style="display:flex;gap:.28rem;align-items:center;flex-shrink:0">'
+    + '<button class="btn gh" style="font-size:.54rem;padding:.12rem .38rem" onclick="viewJobLog(\'' + j.id + '\')">Log</button>'
+    + '<button class="btn cy" style="font-size:.54rem;padding:.12rem .38rem" onclick="toggleJobOut(\'' + j.id + '\')">Inline</button>'
+    + (running ? '<button class="btn r" style="font-size:.54rem;padding:.12rem .38rem" onclick="cancelJob(\'' + j.id + '\')">Cancel</button>' : '')
+    + (done ? '<button class="btn gh" style="font-size:.54rem;padding:.12rem .38rem" onclick="removeJobCard(\'' + j.id + '\')">Remove</button>' : '')
+    + '</div></div>'
+    + '<div style="font-size:.64rem;color:var(--tx2);margin:.28rem 0 .32rem">' + j.dest + '</div>'
+    + urlList + activity + progBar + spinBar + vFiles + failed
+    + '<div class="job-out" id="job-out-' + j.id + '">' + (j.output || []).slice(-80).join('\n') + '</div>'
+    + '</div>';
+}
+
+function viewJobLog(id) {
+  var el = $('job-out-' + id);
+  if (el) { $('term-title').textContent = 'Job ' + id + ' Log'; $('term-body').textContent = el.textContent || '(empty)'; $('term-modal').classList.add('show'); }
+}
+function toggleJobOut(id) { var el = $('job-out-' + id); if (el) el.classList.toggle('expanded'); }
+
+function refreshJobs() {
+  return fetch('/api/download/jobs')
+    .then(function(r) { return r.json(); })
+    .then(function(jobs) {
+      var el = $('jobs-list');
+      if (!jobs.length) { el.innerHTML = '<div style="font-size:.72rem;color:var(--tx2);text-align:center;padding:2rem">No downloads yet</div>'; return; }
+      var order = {running:0,queued:1,partial:2,failed:3,done:4,cancelled:5};
+      jobs.sort(function(a,b) { return (order[a.status]||9) - (order[b.status]||9); });
+      el.innerHTML = jobs.map(renderJob).join('');
+      jobs.filter(function(j) { return j.status === 'running'; }).forEach(function(j) {
+        if (!_jobStreams[j.id]) streamJobOutput(j.id);
+      });
+    })
+    .catch(function(e) { console.warn('refreshJobs error', e); });
+}
+
+function streamJobOutput(jobId) {
+  if (_jobStreams[jobId]) return;
+  var es = new EventSource('/api/download/output/' + jobId);
+  _jobStreams[jobId] = es;
+  es.onmessage = function(e) {
+    var data; try { data = JSON.parse(e.data); } catch(ex) { return; }
+    if (data === '__DONE__') { es.close(); delete _jobStreams[jobId]; refreshJobs(); return; }
+    var out = $('job-out-' + jobId);
+    if (out) {
+      if (data.startsWith && data.startsWith('>>')) {
+        var lines = out.textContent.split('\n');
+        var li = lines.length - 1;
+        if (lines[li] && lines[li].startsWith('>>')) lines[li] = data;
+        else lines.push(data);
+        out.textContent = lines.join('\n');
+      } else {
+        out.textContent += (out.textContent ? '\n' : '') + data;
+      }
+      if (out.classList.contains('expanded')) out.scrollTop = out.scrollHeight;
+    }
+    if (data.startsWith && data.startsWith('>>')) {
+      fetch('/api/download/job/' + jobId).then(function(r) { return r.json(); }).then(function(j) {
+        var card = $('job-' + jobId); if (!card) return;
+        var pct = j.progress && j.progress.pct != null ? j.progress.pct : null; if (pct === null) return;
+        var bar = card.querySelector('[style*="background:var(--gr)"][style*="width"]');
+        if (bar) bar.style.width = Math.min(pct, 100) + '%';
+      }).catch(function() {});
+    }
+  };
+  es.onerror = function() { if (es.readyState === 2) { es.close(); delete _jobStreams[jobId]; } };
+}
+
+function cancelJob(id) {
+  fetch('/api/download/cancel/' + id, {method: 'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(d) { toast(d.msg, d.ok ? 'ok' : 'err'); refreshJobs(); })
+    .catch(function(e) { toast('Error: ' + e.message, 'err'); });
+}
+function clearDoneJobs() {
+  fetch('/api/download/clear', {method: 'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(d) { toast(d.msg, 'ok'); refreshJobs(); })
+    .catch(function(e) { toast('Error: ' + e.message, 'err'); });
+}
+function removeJobCard(id) {
+  var el = $('job-' + id);
+  if (el) { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(function() { el.remove(); }, 300); }
+}
+
+loadDirs(); refreshJobs();
+setInterval(function() {
+  var ap = document.querySelector('.panel.active');
+  if (ap && ap.id === 'panel-downloads') refreshJobs();
+}, 5000);
+
+// =========================================================================
+// File Manager
+// =========================================================================
+var _fmPath = '/mnt/exstore';
+var _renameTarget = null;
+
+var FILE_ICONS = {
+  '.mkv':'[V]','.mp4':'[V]','.avi':'[V]','.mov':'[V]','.webm':'[V]',
+  '.mp3':'[A]','.flac':'[A]','.wav':'[A]','.m4a':'[A]',
+  '.zip':'[Z]','.rar':'[Z]','.7z':'[Z]','.tar':'[Z]','.gz':'[Z]',
+  '.jpg':'[I]','.jpeg':'[I]','.png':'[I]','.gif':'[I]',
+  '.pdf':'[D]','.txt':'[D]','.log':'[D]',
+};
+function fileIcon(name, type) {
+  if (type === 'dir') return '[D]';
+  var ext = (name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+  return FILE_ICONS[ext] || '[F]';
+}
+
+function loadFM(path) {
+  path = path || _fmPath;
+  fetch('/api/files/list?path=' + encodeURIComponent(path))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { toast(data.error, 'err'); return; }
+      _fmPath = data.path; $('fm-path').textContent = data.path;
+      var html = '';
+      if (data.parent) {
+        html += '<div class="fm-entry" onclick="loadFM(\'' + data.parent.replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">'
+          + '<span class="fm-icon">[U]</span><span class="fm-name" style="color:var(--tx2)">..</span></div>';
+      }
+      data.entries.forEach(function(e) {
+        var sp = e.path.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        var sn = e.name.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        html += '<div class="fm-entry" onclick="' + (e.type==='dir' ? 'loadFM(\'' + sp + '\')' : '') + '">'
+          + '<span class="fm-icon">' + fileIcon(e.name, e.type) + '</span>'
+          + '<span class="fm-name" style="color:' + (e.type==='dir'?'var(--yl)':'var(--tx)') + '">' + sn + '</span>'
+          + '<span class="fm-meta">' + (e.type==='file' ? e.size_str : '') + '</span>'
+          + '<div class="fm-actions">'
+          + '<button class="btn gh" style="font-size:.54rem;padding:.1rem .32rem" onclick="event.stopPropagation();openRename(\'' + sp + '\',\'' + e.name.replace(/'/g,"\\'") + '\')">Rename</button>'
+          + (e.type==='file' ? '<button class="btn r" style="font-size:.54rem;padding:.1rem .32rem" onclick="event.stopPropagation();fmDelete(\'' + sp + '\',\'' + sn + '\')">Del</button>' : '')
+          + '</div></div>';
+      });
+      $('fm-list').innerHTML = html || '<div style="color:var(--tx2);font-size:.72rem;padding:.5rem">Empty directory</div>';
+    })
+    .catch(function(e) { toast('File manager error: ' + e.message, 'err'); });
+}
+
+function fmUp() {
+  var p = _fmPath.split('/');
+  if (p.length > 2) loadFM(p.slice(0,-1).join('/'));
+}
+function fmGoto() { var v = $('fm-goto').value.trim(); if (v) loadFM(v); }
+
+function openRename(path, name) {
+  _renameTarget = path; $('rename-old').textContent = path;
+  var inp = $('rename-input'); inp.value = name;
+  $('rename-modal').classList.add('show');
+  setTimeout(function() { inp.select(); }, 60);
+}
+function closeRename() { $('rename-modal').classList.remove('show'); _renameTarget = null; }
+$('rename-modal').onclick = function(e) { if (e.target === $('rename-modal')) closeRename(); };
+$('rename-input').addEventListener('keydown', function(e) { if (e.key === 'Enter') doRename(); if (e.key === 'Escape') closeRename(); });
+
+function doRename() {
+  var newName = $('rename-input').value.trim();
+  if (!newName) { toast('Name cannot be empty', 'err'); return; }
+  if (!_renameTarget) { closeRename(); return; }
+  fetch('/api/files/rename', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path: _renameTarget, name: newName})})
+    .then(function(r) { return r.json(); })
+    .then(function(d) { toast(d.msg, d.ok ? 'ok' : 'err'); if (d.ok) { closeRename(); loadFM(_fmPath); } })
+    .catch(function(e) { toast('Rename error: ' + e.message, 'err'); });
+}
+
+function fmDelete(path, name) {
+  if (!confirm('Delete "' + name + '"? This cannot be undone.')) return;
+  fetch('/api/files/delete', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({path: path})})
+    .then(function(r) { return r.json(); })
+    .then(function(d) { toast(d.msg, d.ok ? 'ok' : 'err'); if (d.ok) loadFM(_fmPath); })
+    .catch(function(e) { toast('Delete error: ' + e.message, 'err'); });
+}
+
+// =========================================================================
+// Command Runner
+// =========================================================================
+var _runnerHist = JSON.parse(localStorage.getItem('runner-hist') || '[]');
+
+var QUICK_CMDS = [
+  {label:'df -h',        cmd:'df -h | grep -v tmpfs | grep -v loop'},
+  {label:'free -h',      cmd:'free -h'},
+  {label:'uptime',       cmd:'uptime'},
+  {label:'top processes',cmd:'ps -eo pid,comm,%mem,%cpu --sort=-%mem --no-headers | head -15'},
+  {label:'docker ps',    cmd:'sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"'},
+  {label:'lsblk',        cmd:'lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,LABEL'},
+  {label:'ip addr',      cmd:'ip addr show'},
+  {label:'yt-dlp ver',   cmd:'yt-dlp --version'},
+  {label:'disk usage',   cmd:'du -sh /mnt/exstore/* 2>/dev/null | sort -rh | head -20'},
+  {label:'netstat',      cmd:'ss -tlnp'},
+  {label:'journalctl',   cmd:'sudo journalctl -n 40 --no-pager'},
+  {label:'aria2c ver',   cmd:'aria2c --version | head -1'},
+];
+
+function renderRunnerChips() {
+  $('runner-chips').innerHTML = QUICK_CMDS.map(function(q) {
+    return '<button class="btn gh" style="font-size:.58rem;padding:.18rem .45rem" onclick="$(' + "'runner-cmd'" + ').value=' + JSON.stringify(q.cmd) + ';runCommand()">' + q.label + '</button>';
+  }).join('');
+}
+
+function renderRunnerHistory() {
+  var el = $('runner-history');
+  if (!_runnerHist.length) { el.innerHTML = '<span style="color:var(--tx3)">No commands run yet</span>'; return; }
+  el.innerHTML = _runnerHist.slice().reverse().slice(0,20).map(function(h, i) {
+    var idx = _runnerHist.length - i;
+    var safe = h.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return '<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;border-bottom:1px solid var(--bdr);cursor:pointer" onclick="$(' + "'runner-cmd'" + ').value=' + JSON.stringify(h) + ';runCommand()">'
+      + '<span style="color:var(--or);font-size:.6rem;flex-shrink:0">' + idx + '</span>'
+      + '<span style="font-family:var(--mono);color:var(--tx);font-size:.68rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + safe + '</span>'
+      + '<span style="font-size:.58rem;color:var(--cy)">run</span></div>';
+  }).join('');
+}
+
+function addRunnerHistory(cmd) {
+  _runnerHist = _runnerHist.filter(function(h) { return h !== cmd; });
+  _runnerHist.push(cmd);
+  if (_runnerHist.length > 50) _runnerHist.shift();
+  localStorage.setItem('runner-hist', JSON.stringify(_runnerHist));
+  renderRunnerHistory();
+}
+function clearRunnerHistory() { _runnerHist = []; localStorage.removeItem('runner-hist'); renderRunnerHistory(); }
+
+function runCommand() {
+  var cmd = $('runner-cmd').value.trim();
+  if (!cmd) { toast('Enter a command first', 'err'); return; }
+
+  var out = $('runner-out');
+  var stat = $('runner-status');
+  var runBtn = $('runner-run-btn');
+  var killBtn = $('runner-kill-btn');
+
+  out.textContent = '$ ' + cmd + '\n';
+  stat.textContent = 'Running...'; stat.style.color = 'var(--yl)';
+  runBtn.disabled = true; killBtn.style.display = 'inline-flex';
+
+  addRunnerHistory(cmd);
+  var startTime = Date.now();
+  var stopped = false;
+
+  fetch('/api/run_command', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({cmd: cmd})})
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var reader = r.body.getReader();
+      var decoder = new TextDecoder();
+      var buf = '';
+      function pump() {
+        if (stopped) return;
+        reader.read().then(function(result) {
+          if (result.done) { finishRunner(0, Date.now() - startTime); return; }
+          buf += decoder.decode(result.value, {stream: true});
+          var parts = buf.split('\n\n');
+          buf = parts.pop();
+          parts.forEach(function(part) {
+            if (!part.startsWith('data:')) return;
+            var raw = part.slice(5).trim();
+            var data; try { data = JSON.parse(raw); } catch(ex) { return; }
+            if (typeof data === 'string' && data.startsWith('__DONE__:')) {
+              var rc = parseInt(data.split(':')[1]) || 0;
+              finishRunner(rc, Date.now() - startTime); stopped = true; return;
+            }
+            out.textContent += data + '\n';
+            out.scrollTop = out.scrollHeight;
+          });
+          if (!stopped) pump();
+        }).catch(function(e) {
+          out.textContent += '\n[Stream error: ' + e.message + ']\n';
+          finishRunner(1, Date.now() - startTime);
+        });
+      }
+      pump();
+    })
+    .catch(function(e) { out.textContent += '[Error: ' + e.message + ']\n'; finishRunner(1, 0); });
+}
+
+function finishRunner(rc, ms) {
+  var elapsed = ms >= 1000 ? (ms/1000).toFixed(1) + 's' : ms + 'ms';
+  var stat = $('runner-status');
+  stat.textContent = rc === 0 ? 'Done (' + elapsed + ')' : 'Exit ' + rc + ' (' + elapsed + ')';
+  stat.style.color = rc === 0 ? 'var(--gr)' : 'var(--rd)';
+  $('runner-run-btn').disabled = false;
+  $('runner-kill-btn').style.display = 'none';
+}
+function killRunner() {
+  $('runner-out').textContent += '\n[Stopped by user]\n';
+  finishRunner(130, 0);
+}
+function clearRunner() {
+  $('runner-out').textContent = '';
+  $('runner-status').textContent = 'Ready'; $('runner-status').style.color = 'var(--tx3)';
+}
+function copyRunnerOut() {
+  navigator.clipboard && navigator.clipboard.writeText($('runner-out').textContent)
+    .then(function() { toast('Copied!', 'ok', 2000); })
+    .catch(function() { toast('Copy failed', 'err'); });
+}
+
+renderRunnerChips(); renderRunnerHistory();
+{%- endraw %}
+</script>
+</body>
+</html>

@@ -1,0 +1,1326 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Seedbox Web Dashboard v6 - Production Grade"""
+
+import subprocess
+import os
+import json
+import time
+import threading
+import re
+import glob
+import uuid
+import signal
+import shutil
+from pathlib import Path
+from flask import Flask, jsonify, render_template, request, Response, stream_with_context
+
+app = Flask(__name__)
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+MOUNT_POINT      = "/mnt/exstore"
+COMPOSE_DIR      = os.path.expanduser("~/seedbox")
+SAMBA_SERVICE    = "smbd"
+WEBUI_PORT       = 8080
+JELLYFIN_PORT    = 8096
+WETTY_PORT       = 7681
+FILEBROWSER_PORT = 8097
+AVISTAZ_IP       = "143.244.42.67"
+SMB_CONF         = "/etc/samba/smb.conf"
+DOWNLOAD_SCRIPT  = os.path.expanduser("~/download.sh")
+MOUNT_POINT_BASE = "/mnt/exstore"
+
+PRESET_DIRS = [
+    {"label": "exstore (root)",   "path": "/mnt/exstore"},
+    {"label": "TVShows",          "path": "/mnt/exstore/TVShows"},
+    {"label": "TVShows/Torrent",  "path": "/mnt/exstore/TVShows/Torrent"},
+    {"label": "Movies",           "path": "/mnt/exstore/Movies"},
+    {"label": "Music",            "path": "/mnt/exstore/Music"},
+    {"label": "Downloads",        "path": "/mnt/exstore/Downloads"},
+    {"label": "Home (~)",         "path": os.path.expanduser("~")},
+]
+
+VPN_PROXY        = "socks5://127.0.0.1:10800"
+MAX_OUTPUT_LINES = 600
+KEEP_OUTPUT_LINES = 450
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def run(cmd, timeout=30):
+    try:
+        r = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=timeout
+        )
+        return r.stdout.strip(), r.stderr.strip(), r.returncode
+    except subprocess.TimeoutExpired:
+        return "", "timed out", 1
+    except Exception as e:
+        return "", str(e), 1
+
+
+def run_stream(cmd):
+    try:
+        proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True,
+            stdin=subprocess.DEVNULL
+        )
+        for line in proc.stdout:
+            yield "data: {}\n\n".format(json.dumps(line.rstrip()))
+        proc.wait()
+        yield "data: {}\n\n".format(json.dumps("__DONE__"))
+    except Exception as e:
+        yield "data: {}\n\n".format(json.dumps("ERROR: {}".format(e)))
+        yield "data: {}\n\n".format(json.dumps("__DONE__"))
+
+
+def strip_ansi(text):
+    return re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+
+# ---------------------------------------------------------------------------
+# System info helpers
+# ---------------------------------------------------------------------------
+def _docker_running():
+    _, _, rc = run("sudo docker info 2>/dev/null", timeout=8)
+    return rc == 0
+
+
+def _container_running(name):
+    out, _, rc = run(
+        "sudo docker ps --filter 'name=^{}$' --filter 'status=running' -q 2>/dev/null".format(name)
+    )
+    return rc == 0 and bool(out.strip())
+
+
+def _samba_running():
+    _, _, rc = run("systemctl is-active --quiet {}".format(SAMBA_SERVICE))
+    if rc == 0:
+        return True
+    _, _, rc2 = run("pgrep smbd")
+    return rc2 == 0
+
+
+def _disk_mounted():
+    _, _, rc = run("mountpoint -q {}".format(MOUNT_POINT))
+    return rc == 0
+
+
+def _get_cpu():
+    try:
+        def sample():
+            with open("/proc/stat") as f:
+                vals = f.readline().split()[1:]
+            return int(vals[0]) + int(vals[2]), sum(int(v) for v in vals)
+        b1, t1 = sample()
+        time.sleep(0.5)
+        b2, t2 = sample()
+        dt = t2 - t1
+        return round(100 * (b2 - b1) / dt, 1) if dt > 0 else 0.0
+    except Exception:
+        return 0.0
+
+
+def _get_ram():
+    try:
+        out, _, _ = run("free -m | awk '/^Mem:/{print $2,$3,$4}'")
+        total, used, free = map(int, out.split())
+        return {"total": total, "used": used, "free": free,
+                "pct": round(100 * used / total, 1)}
+    except Exception:
+        return {"total": 0, "used": 0, "free": 0, "pct": 0}
+
+
+def _get_swap():
+    try:
+        out, _, _ = run("free -m | awk '/^Swap:/{print $2,$3}'")
+        parts = out.split()
+        if len(parts) >= 2:
+            total, used = int(parts[0]), int(parts[1])
+            pct = round(100 * used / total, 1) if total > 0 else 0
+            return {"total": total, "used": used, "pct": pct}
+    except Exception:
+        pass
+    return {"total": 0, "used": 0, "pct": 0}
+
+
+def _get_temps():
+    temps = {}
+    out, _, rc = run("sensors 2>/dev/null | grep -E '(Core|Package|temp|Tdie|Tctl)' | head -10")
+    if rc == 0 and out:
+        for line in out.splitlines():
+            parts = line.split(":")
+            if len(parts) == 2:
+                name = parts[0].strip()
+                val = parts[1].strip().split()[0].replace("+", "").replace("C", "")
+                val = re.sub(r'[^\d.]', '', val)
+                try:
+                    temps[name] = float(val)
+                except Exception:
+                    pass
+    if not temps:
+        for p in glob.glob("/sys/class/thermal/thermal_zone*/temp"):
+            try:
+                temps[p.split("/")[-2]] = round(int(open(p).read().strip()) / 1000, 1)
+            except Exception:
+                pass
+    return temps
+
+
+def _get_net_io():
+    try:
+        def read_net():
+            rx = tx = 0
+            with open("/proc/net/dev") as f:
+                for line in f:
+                    if ":" in line:
+                        iface, data = line.split(":", 1)
+                        if "lo" not in iface.strip():
+                            vals = data.split()
+                            rx += int(vals[0])
+                            tx += int(vals[8])
+            return rx, tx
+        r1, t1 = read_net()
+        time.sleep(0.5)
+        r2, t2 = read_net()
+        return {
+            "rx_kb": round((r2 - r1) * 2 / 1024, 1),
+            "tx_kb": round((t2 - t1) * 2 / 1024, 1)
+        }
+    except Exception:
+        return {"rx_kb": 0, "tx_kb": 0}
+
+
+def _get_disk_io():
+    try:
+        def read_disk():
+            rb = wb = 0
+            with open("/proc/diskstats") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 14:
+                        dev = parts[2]
+                        if re.match(r'^(sd[a-z]|nvme\d+n\d+|mmcblk\d+|hd[a-z])$', dev):
+                            rb += int(parts[5]) * 512
+                            wb += int(parts[9]) * 512
+            return rb, wb
+        r1, w1 = read_disk()
+        time.sleep(0.5)
+        r2, w2 = read_disk()
+        return {
+            "read_kb":  round((r2 - r1) * 2 / 1024, 1),
+            "write_kb": round((w2 - w1) * 2 / 1024, 1)
+        }
+    except Exception:
+        return {"read_kb": 0, "write_kb": 0}
+
+
+def _get_qbit_stats():
+    try:
+        out, _, rc = run(
+            "curl -s --max-time 5 http://localhost:{}/api/v2/torrents/info".format(WEBUI_PORT),
+            timeout=8
+        )
+        if rc != 0 or not out:
+            return {}
+        torrents = json.loads(out)
+        return {
+            "total":       len(torrents),
+            "downloading": sum(1 for t in torrents if t.get("state") in
+                               ("downloading", "stalledDL", "metaDL", "checkingDL")),
+            "seeding":     sum(1 for t in torrents if t.get("state") in
+                               ("uploading", "stalledUP", "seeding", "forcedUP")),
+            "paused":      sum(1 for t in torrents if "paused" in t.get("state", "").lower()),
+            "errored":     sum(1 for t in torrents if "error" in t.get("state", "").lower()),
+            "dl_speed_kb": round(sum(t.get("dlspeed", 0) for t in torrents) / 1024, 1),
+            "ul_speed_kb": round(sum(t.get("upspeed", 0) for t in torrents) / 1024, 1),
+            "dl_total_gb": round(sum(t.get("downloaded", 0) for t in torrents) / 1024 ** 3, 2),
+            "ul_total_gb": round(sum(t.get("uploaded", 0) for t in torrents) / 1024 ** 3, 2),
+        }
+    except Exception:
+        return {}
+
+
+def _get_samba_connections():
+    try:
+        out, _, rc = run("sudo smbstatus -b 2>/dev/null | tail -n +4 | grep -v '^$' | head -10")
+        if rc != 0 or not out:
+            return []
+        conns = []
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[0].isdigit():
+                conns.append({"pid": parts[0], "user": parts[1], "machine": parts[2]})
+        return conns
+    except Exception:
+        return []
+
+
+def _mount_disk():
+    dev = ""
+    for cmd in [
+        "sudo blkid -L exstore 2>/dev/null",
+        "sudo blkid 2>/dev/null | grep -iE 'ntfs|exfat' | awk -F: '{print $1}' | head -1"
+    ]:
+        out, _, _ = run(cmd)
+        if out.strip():
+            dev = out.strip()
+            break
+    if not dev:
+        for d in ["/dev/sdc1", "/dev/sdb1", "/dev/sdd1", "/dev/sdc", "/dev/sdb"]:
+            x, _, _ = run("test -b {} && echo yes".format(d))
+            if x == "yes":
+                dev = d
+                break
+    if not dev:
+        return False, "No external disk found - is it plugged in?"
+    run("sudo mkdir -p {}".format(MOUNT_POINT))
+    for mount_cmd in [
+        "sudo mount -t ntfs-3g -o rw,uid=1000,gid=1000,umask=0000 {} {}".format(dev, MOUNT_POINT),
+        "sudo mount -o uid=1000,gid=1000 {} {}".format(dev, MOUNT_POINT)
+    ]:
+        _, err, rc = run("{} 2>&1".format(mount_cmd))
+        if rc == 0:
+            return True, dev
+    if _disk_mounted():
+        return True, dev
+    return False, "Mount failed: {}".format(err)
+
+# ---------------------------------------------------------------------------
+# API: Status
+# ---------------------------------------------------------------------------
+@app.route("/api/status")
+def api_status():
+    docker      = _docker_running()
+    gluetun     = _container_running("gluetun")     if docker else False
+    qbit        = _container_running("qbittorrent") if docker else False
+    jellyfin    = _container_running("jellyfin")    if docker else False
+    wetty       = _container_running("wetty")       if docker else False
+    filebrowser = _container_running("filebrowser") if docker else False
+    samba       = _samba_running()
+    disk        = _disk_mounted()
+
+    disk_info = {}
+    if disk:
+        out, _, _ = run("df -h {} | tail -1".format(MOUNT_POINT))
+        parts = out.split()
+        if len(parts) >= 5:
+            disk_info = {"size": parts[1], "used": parts[2],
+                         "free": parts[3], "pct":  parts[4]}
+
+    local_ip, _, _ = run("hostname -I | awk '{print $1}'")
+    home_ip, _, _  = run(
+        "wget -qO- --timeout=5 api.ipify.org 2>/dev/null || "
+        "curl -s --max-time 5 api.ipify.org 2>/dev/null"
+    )
+    home_ip = home_ip.strip()
+    if not re.match(r'^\d+\.\d+\.\d+\.\d+$', home_ip):
+        home_ip = ""
+
+    vpn_ip = ""
+    if qbit:
+        v, _, _ = run(
+            "sudo docker exec qbittorrent wget -qO- --timeout=8 api.ipify.org 2>/dev/null"
+        )
+        v = v.strip()
+        if re.match(r'^\d+\.\d+\.\d+\.\d+$', v):
+            vpn_ip = v
+
+    if not vpn_ip:
+        ip_status = "unknown"
+    elif vpn_ip == home_ip:
+        ip_status = "leak"
+    elif vpn_ip == AVISTAZ_IP:
+        ip_status = "ok"
+    else:
+        ip_status = "mismatch"
+
+    smb_shares = 0
+    try:
+        cfg = open(SMB_CONF).read()
+        smb_shares = len(re.findall(r'^\[(?!global|printers|print\$)', cfg, re.MULTILINE))
+    except Exception:
+        pass
+
+    try:
+        load_avg = " ".join(open("/proc/loadavg").read().split()[:3])
+    except Exception:
+        load_avg = "?"
+
+    return jsonify({
+        "gluetun": gluetun, "qbittorrent": qbit, "jellyfin": jellyfin,
+        "wetty": wetty, "filebrowser": filebrowser, "docker": docker,
+        "samba": samba,
+        "smb_connections": _get_samba_connections() if samba else [],
+        "smb_shares": smb_shares,
+        "disk_mounted": disk, "disk": disk_info,
+        "local_ip": local_ip, "home_ip": home_ip,
+        "vpn_ip": vpn_ip, "avistaz_ip": AVISTAZ_IP, "ip_status": ip_status,
+        "webui_port": WEBUI_PORT, "jellyfin_port": JELLYFIN_PORT,
+        "wetty_port": WETTY_PORT, "filebrowser_port": FILEBROWSER_PORT,
+        "cpu":  _get_cpu(), "ram": _get_ram(), "swap": _get_swap(),
+        "load": load_avg,
+        "cores": run("nproc")[0],
+        "uptime": run("uptime -p")[0],
+        "temps": _get_temps(),
+        "net":   _get_net_io(),
+        "disk_io": _get_disk_io(),
+        "qbit_stats": _get_qbit_stats() if qbit else {},
+    })
+
+# ---------------------------------------------------------------------------
+# API: Actions
+# ---------------------------------------------------------------------------
+@app.route("/api/action", methods=["POST"])
+def api_action():
+    data = request.json
+    if not data:
+        return jsonify({"ok": False, "msg": "No request body"}), 400
+    action = data.get("action", "")
+
+    def dc(cmd, t=90):
+        return run("cd {} && sudo docker-compose {} 2>&1".format(COMPOSE_DIR, cmd), timeout=t)
+
+    def _stop_all():
+        dc("down", 60)
+        run("sudo systemctl stop {} 2>/dev/null".format(SAMBA_SERVICE), timeout=10)
+        out, _, _ = run("sudo docker ps -q 2>/dev/null")
+        if out.strip():
+            run("sudo docker stop $(sudo docker ps -q) 2>/dev/null", timeout=30)
+        run("sudo systemctl stop docker docker.socket containerd 2>/dev/null", timeout=15)
+        run("sudo umount -l {} 2>/dev/null || true".format(MOUNT_POINT), timeout=10)
+
+    # --- special actions ---
+    if action == "samba_config":
+        try:
+            return jsonify({"ok": True, "msg": open(SMB_CONF).read()})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": "Cannot read smb.conf: {}".format(e)})
+
+    if action == "mount_disk":
+        ok, msg = _mount_disk()
+        return jsonify({"ok": ok, "msg": "Disk mounted ({}) OK".format(msg) if ok else msg})
+
+    if action == "unmount_disk":
+        _, err, rc = run(
+            "sudo umount {0} 2>/dev/null || sudo umount -l {0} 2>/dev/null".format(MOUNT_POINT)
+        )
+        return jsonify({"ok": rc == 0,
+                        "msg": "Disk unmounted!" if rc == 0 else "Failed: {}".format(err)})
+
+    if action == "remount_disk":
+        run("sudo umount -l {} 2>/dev/null || true".format(MOUNT_POINT))
+        time.sleep(1)
+        ok, msg = _mount_disk()
+        return jsonify({"ok": ok, "msg": "Disk remounted ({}) OK".format(msg) if ok else msg})
+
+    if action == "stop_docker":
+        dc("down", 60)
+        out, _, _ = run("sudo docker ps -q 2>/dev/null")
+        if out.strip():
+            run("sudo docker stop $(sudo docker ps -q) 2>/dev/null", timeout=30)
+        run("sudo systemctl stop docker 2>/dev/null", timeout=15)
+        run("sudo systemctl stop docker.socket containerd 2>/dev/null", timeout=10)
+        _, _, rc = run("sudo systemctl is-active --quiet docker")
+        return jsonify({"ok": rc != 0,
+                        "msg": "Docker stopped!" if rc != 0 else "Docker may still be running"})
+
+    if action == "shutdown":
+        def _do():
+            time.sleep(2)
+            _stop_all()
+            time.sleep(2)
+            os.system("sudo shutdown now")
+        threading.Thread(target=_do, daemon=True).start()
+        return jsonify({"ok": True, "msg": "Shutting down safely - stopping all services first..."})
+
+    if action == "reboot":
+        def _do():
+            time.sleep(2)
+            _stop_all()
+            time.sleep(2)
+            os.system("sudo reboot")
+        threading.Thread(target=_do, daemon=True).start()
+        return jsonify({"ok": True, "msg": "Rebooting safely - stopping all services first..."})
+
+    if action == "power_save":
+        def _do():
+            _stop_all()
+            run("sudo systemctl stop cups avahi-daemon bluetooth 2>/dev/null || true", timeout=10)
+        threading.Thread(target=_do, daemon=True).start()
+        return jsonify({"ok": True,
+                        "msg": "Power save active - all services stopped. SSH stays up."})
+
+    if action == "restore_power_save":
+        def _do():
+            _mount_disk()
+            run("sudo systemctl start docker", timeout=25)
+            time.sleep(5)
+            dc("up -d jellyfin", 60)
+            run("sudo systemctl start {}".format(SAMBA_SERVICE), timeout=10)
+            run("sudo docker start wetty filebrowser 2>/dev/null", timeout=15)
+            run("sudo systemctl start avahi-daemon 2>/dev/null || true")
+        threading.Thread(target=_do, daemon=True).start()
+        return jsonify({"ok": True,
+                        "msg": "Restoring - starting Docker, Jellyfin, Samba, Wetty, FileBrowser..."})
+
+    if action == "check_ip":
+        v, _, _ = run(
+            "sudo docker exec qbittorrent wget -qO- --timeout=10 api.ipify.org 2>/dev/null"
+        )
+        vpn_ip = v.strip()
+        if vpn_ip == AVISTAZ_IP:
+            return jsonify({"ok": True,  "msg": "VPN IP matches AvistaZ! ({})".format(vpn_ip)})
+        elif not vpn_ip:
+            return jsonify({"ok": False, "msg": "Could not get VPN IP - still connecting?"})
+        else:
+            return jsonify({"ok": False,
+                            "msg": "IP mismatch: got {}, expected {}".format(vpn_ip, AVISTAZ_IP)})
+
+    # --- simple action table ---
+    actions = {
+        "start_seedbox":      lambda: dc("up -d", 90),
+        "stop_seedbox":       lambda: dc("down", 60),
+        "restart_seedbox":    lambda: (dc("down", 60), time.sleep(2), dc("up -d", 90))[2],
+        "start_jellyfin":     lambda: dc("up -d jellyfin", 60),
+        "stop_jellyfin":      lambda: run("sudo docker stop jellyfin 2>/dev/null", timeout=30),
+        "restart_jellyfin":   lambda: run("sudo docker restart jellyfin 2>/dev/null", timeout=30),
+        "jellyfin_logs":      lambda: run("sudo docker logs jellyfin --tail 80 2>&1"),
+        "start_wetty":        lambda: run("sudo docker start wetty 2>/dev/null", timeout=20),
+        "stop_wetty":         lambda: run("sudo docker stop wetty 2>/dev/null", timeout=20),
+        "restart_wetty":      lambda: run("sudo docker restart wetty 2>/dev/null", timeout=20),
+        "start_filebrowser":  lambda: run("sudo docker start filebrowser 2>/dev/null", timeout=20),
+        "stop_filebrowser":   lambda: run("sudo docker stop filebrowser 2>/dev/null", timeout=20),
+        "restart_filebrowser":lambda: run("sudo docker restart filebrowser 2>/dev/null", timeout=20),
+        "start_samba":        lambda: run("sudo systemctl start {}".format(SAMBA_SERVICE)),
+        "stop_samba":         lambda: run("sudo systemctl stop {}".format(SAMBA_SERVICE)),
+        "restart_samba":      lambda: run("sudo systemctl restart {}".format(SAMBA_SERVICE)),
+        "samba_status":       lambda: run("sudo smbstatus 2>/dev/null || echo 'No active connections'"),
+        "samba_testparm":     lambda: run("testparm -s 2>&1"),
+        "start_docker":       lambda: run("sudo systemctl start docker", timeout=25),
+        "df":         lambda: run("df -h | grep -v tmpfs | grep -v loop | grep -v udev"),
+        "lsblk":      lambda: run("lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,LABEL 2>/dev/null"),
+        "docker_ps":  lambda: run(
+            "sudo docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null"),
+        "docker_images": lambda: run(
+            "sudo docker images --format "
+            "'table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' 2>/dev/null"),
+        "docker_stats": lambda: run(
+            "sudo docker stats --no-stream --format "
+            "'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}' 2>/dev/null"),
+        "ping_avistaz": lambda: run("ping -c 4 {} 2>&1".format(AVISTAZ_IP)),
+    }
+
+    info_actions = {
+        "jellyfin_logs", "samba_status", "samba_testparm",
+        "df", "lsblk", "docker_ps", "docker_images", "docker_stats", "ping_avistaz"
+    }
+
+    msg_map = {
+        "start_seedbox":      ("Seedbox started!", "Start failed"),
+        "stop_seedbox":       ("Seedbox stopped!", "Stop failed"),
+        "restart_seedbox":    ("Seedbox restarted!", "Restart failed"),
+        "start_jellyfin":     ("Jellyfin started!", "Start failed"),
+        "stop_jellyfin":      ("Jellyfin stopped!", "Stop failed"),
+        "restart_jellyfin":   ("Jellyfin restarted!", "Restart failed"),
+        "jellyfin_logs":      ("", "No logs"),
+        "start_wetty":        ("Wetty started!", "Start failed"),
+        "stop_wetty":         ("Wetty stopped!", "Stop failed"),
+        "restart_wetty":      ("Wetty restarted!", "Restart failed"),
+        "start_filebrowser":  ("FileBrowser started!", "Start failed"),
+        "stop_filebrowser":   ("FileBrowser stopped!", "Stop failed"),
+        "restart_filebrowser":("FileBrowser restarted!", "Restart failed"),
+        "start_samba":        ("Samba started!", "Start failed"),
+        "stop_samba":         ("Samba stopped!", "Stop failed"),
+        "restart_samba":      ("Samba restarted!", "Restart failed"),
+        "samba_status":       ("", "Error"),
+        "samba_testparm":     ("", "Error"),
+        "start_docker":       ("Docker started!", "Start failed"),
+        "df":                 ("", "Error"),
+        "lsblk":              ("", "Error"),
+        "docker_ps":          ("", "Error"),
+        "docker_images":      ("", "Error"),
+        "docker_stats":       ("", "Error"),
+        "ping_avistaz":       ("", "Ping failed"),
+    }
+
+    if action in actions:
+        out, err, rc = actions[action]()
+        if action in info_actions:
+            return jsonify({"ok": True, "msg": out or err or "No output"})
+        if action in msg_map:
+            ok_msg, err_msg = msg_map[action]
+            return jsonify({"ok": rc == 0,
+                            "msg": ok_msg if rc == 0 else "{}: {}".format(err_msg, err or out)})
+
+    return jsonify({"ok": False, "msg": "Unknown action: {}".format(action)})
+
+# ---------------------------------------------------------------------------
+# API: Logs
+# ---------------------------------------------------------------------------
+@app.route("/api/logs/<service>")
+def api_logs(service):
+    log_file = os.path.expanduser("~/seedbox/seedbox.log")
+    cmds = {
+        "gluetun":     "sudo docker logs gluetun --tail 100 2>&1",
+        "qbittorrent": "sudo docker logs qbittorrent --tail 100 2>&1",
+        "jellyfin":    "sudo docker logs jellyfin --tail 100 2>&1",
+        "wetty":       "sudo docker logs wetty --tail 100 2>&1",
+        "filebrowser": "sudo docker logs filebrowser --tail 100 2>&1",
+        "samba":       "sudo journalctl -u smbd -n 80 --no-pager 2>/dev/null",
+        "docker":      "sudo journalctl -u docker -n 80 --no-pager 2>/dev/null",
+        "system":      "tail -100 {} 2>/dev/null || echo 'No log file yet'".format(log_file),
+        "syslog":      "sudo journalctl -n 80 --no-pager 2>/dev/null",
+    }
+    if service not in cmds:
+        return jsonify({"error": "unknown service"}), 400
+    return Response(
+        stream_with_context(run_stream(cmds[service])),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+# ---------------------------------------------------------------------------
+# API: Processes
+# ---------------------------------------------------------------------------
+@app.route("/api/processes")
+def api_processes():
+    out, _, _ = run(
+        "ps -eo pid,comm,%mem,%cpu,etime --no-headers --sort=-%mem 2>/dev/null | head -20"
+    )
+    procs = []
+    for line in out.splitlines():
+        parts = line.split(None, 4)
+        if len(parts) >= 4:
+            procs.append({
+                "pid":  parts[0],
+                "name": parts[1],
+                "mem":  parts[2],
+                "cpu":  parts[3],
+                "time": parts[4].strip() if len(parts) > 4 else ""
+            })
+    return jsonify(procs)
+
+
+@app.route("/api/kill_process", methods=["POST"])
+def api_kill_process():
+    data = request.json or {}
+    pid = str(data.get("pid", "")).strip()
+    sig = data.get("signal", "TERM")
+
+    if not pid or not pid.isdigit():
+        return jsonify({"ok": False, "msg": "Invalid PID"}), 400
+    if pid in ("1", str(os.getpid())):
+        return jsonify({"ok": False, "msg": "Cannot kill that process"}), 403
+
+    sig_map = {"TERM": signal.SIGTERM, "KILL": signal.SIGKILL, "HUP": signal.SIGHUP}
+    sig_num = sig_map.get(sig, signal.SIGTERM)
+
+    try:
+        os.kill(int(pid), sig_num)
+        return jsonify({"ok": True, "msg": "Sent {} to PID {}".format(sig, pid)})
+    except ProcessLookupError:
+        return jsonify({"ok": False, "msg": "PID {} not found".format(pid)}), 404
+    except PermissionError:
+        _, err, rc = run("sudo kill -{} {} 2>&1".format(sig, pid))
+        if rc == 0:
+            return jsonify({"ok": True, "msg": "Sent {} to PID {} (via sudo)".format(sig, pid)})
+        return jsonify({"ok": False, "msg": "Permission denied: {}".format(err)}), 403
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+# ---------------------------------------------------------------------------
+# API: Run command (SSE stream)
+# ---------------------------------------------------------------------------
+@app.route("/api/run_command", methods=["POST"])
+def api_run_command():
+    data = request.json or {}
+    cmd = data.get("cmd", "").strip()
+    if not cmd:
+        return jsonify({"ok": False, "msg": "No command provided"}), 400
+
+    blocked = ["rm -rf /", "mkfs", "dd if=", ":(){:|:&};:"]
+    for b in blocked:
+        if b in cmd:
+            return jsonify({"ok": False, "msg": "Blocked command pattern: {}".format(b)}), 403
+
+    def generate():
+        try:
+            proc = subprocess.Popen(
+                cmd, shell=True,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+                stdin=subprocess.DEVNULL,
+                env={**os.environ, "TERM": "xterm"}
+            )
+            for line in proc.stdout:
+                clean = strip_ansi(line.rstrip())
+                yield "data: {}\n\n".format(json.dumps(clean))
+            proc.wait()
+            yield "data: {}\n\n".format(json.dumps("__DONE__:{}".format(proc.returncode)))
+        except Exception as e:
+            yield "data: {}\n\n".format(json.dumps("ERROR: {}".format(e)))
+            yield "data: {}\n\n".format(json.dumps("__DONE__:1"))
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+# ---------------------------------------------------------------------------
+# Download Manager - job store
+# ---------------------------------------------------------------------------
+_jobs = {}
+_jobs_lock = threading.Lock()
+
+
+def _safe_path(path):
+    path = os.path.normpath(path.strip())
+    if not os.path.isabs(path):
+        raise ValueError("Path must be absolute")
+    forbidden = ["\x00", ";", "&", "|", "`", "$", "(", ")", "<", ">", "\\"]
+    for c in forbidden:
+        if c in path:
+            raise ValueError("Illegal character in path: {!r}".format(c))
+    return path
+
+
+def _has_tool(tool):
+    return shutil.which(tool) is not None
+
+
+def _disk_free_gb(path):
+    try:
+        usage = shutil.disk_usage(path)
+        return usage.free / 1024 ** 3
+    except Exception:
+        return 999.0
+
+
+def _push_output(job_id, line, is_progress=False):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            return
+        if is_progress:
+            out = job["output"]
+            if out and out[-1].startswith(">>"):
+                out[-1] = line
+            else:
+                out.append(line)
+        else:
+            job["output"].append(line)
+        if len(job["output"]) > MAX_OUTPUT_LINES:
+            job["output"] = job["output"][-KEEP_OUTPUT_LINES:]
+
+
+YTDLP_PROGRESS_RE = re.compile(
+    r'\[download\]\s+([\d.]+%)\s+of\s+([\d.]+\S+)\s+at\s+([\d.]+\S+/s)\s+ETA\s+(\S+)'
+)
+ARIA2_PROGRESS_RE = re.compile(
+    r'\[#\S+\s+([\d.]+\S+)/([\d.]+\S+)\((\d+%)\)\s+CN:\d+\s+DL:([\d.]+\S+/s)'
+)
+WGET_PROGRESS_RE = re.compile(r'(\d+)%\s+[\d.]+[KMGT]?\s+([\d.]+[KMGT]?/s)')
+
+
+def _parse_progress(line):
+    m = YTDLP_PROGRESS_RE.search(line)
+    if m:
+        pct, size, speed, eta = m.groups()
+        return (">> {}  of {}  at {}  ETA {}".format(pct, size, speed, eta),
+                {"pct": float(pct.rstrip('%')), "size": size, "speed": speed, "eta": eta})
+    m = ARIA2_PROGRESS_RE.search(line)
+    if m:
+        done, total, pct, speed = m.groups()
+        return (">> {}  {}/{}  at {}".format(pct, done, total, speed),
+                {"pct": float(pct.rstrip('%')), "size": total, "speed": speed, "eta": "?"})
+    m = WGET_PROGRESS_RE.search(line)
+    if m:
+        pct, speed = m.groups()
+        return (">> {}%  at {}".format(pct, speed),
+                {"pct": float(pct), "speed": speed, "eta": "?"})
+    return None, {}
+
+
+def _build_cmds(url, dest, method, proxy=""):
+    """Build ordered list of (tool_name, shell_command) to try."""
+    url_lower = url.lower().split("?")[0]
+
+    if method == "auto":
+        direct_exts = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv",
+                       ".mp3", ".flac", ".wav", ".m4a", ".aac",
+                       ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
+                       ".iso", ".img", ".deb", ".rpm", ".exe", ".dmg",
+                       ".jpg", ".jpeg", ".png", ".gif", ".pdf")
+        url_method = "direct" if any(url_lower.endswith(e) for e in direct_exts) else "auto"
+    else:
+        url_method = method
+
+    p  = "--proxy {}".format(proxy) if proxy else ""
+    ap = "--all-proxy={}".format(proxy) if proxy else ""
+    wp = "-e use_proxy=yes -e https_proxy={0} -e http_proxy={0}".format(proxy) if proxy else ""
+    tag = " [VPN]" if proxy else ""
+
+    fname = re.sub(r'[/<>:"|?*\\]', '_',
+                   os.path.basename(url.split("?")[0]) or "dl_{}".format(int(time.time())))
+    outfile = os.path.join(dest, fname)
+    cmds = []
+
+    if url.startswith("magnet:"):
+        cmds.append(("qbittorrent",
+            "curl -s 'http://localhost:{}/api/v2/torrents/add'"
+            " -F 'urls={}' -F 'savepath={}'".format(WEBUI_PORT, url, dest)))
+        return cmds
+
+    # yt-dlp (handles both video sites AND direct video files well)
+    if url_method in ("auto", "ytdlp", "video", "audio", "direct"):
+        if _has_tool("yt-dlp") and _has_tool("aria2c"):
+            cmds.append(("yt-dlp+aria2c{}".format(tag),
+                "yt-dlp --continue --no-part --retries 5 --fragment-retries 5"
+                " --external-downloader aria2c"
+                " --external-downloader-args 'aria2c:-x 16 -s 16 -k 1M --retry-wait=5'"
+                " --merge-output-format mkv --add-metadata --newline"
+                " {} -P '{}' '{}'".format(p, dest, url)))
+        if _has_tool("yt-dlp"):
+            cmds.append(("yt-dlp{}".format(tag),
+                "yt-dlp --continue --no-part --retries 5 --fragment-retries 5"
+                " --merge-output-format mkv --add-metadata --newline"
+                " {} -P '{}' '{}'".format(p, dest, url)))
+
+    if url_method == "auto" and _has_tool("gallery-dl"):
+        cmds.append(("gallery-dl{}".format(tag),
+            "gallery-dl --directory '{}' --retries 5 {} '{}'".format(dest, p, url)))
+
+    # Direct downloaders
+    if _has_tool("aria2c"):
+        cmds.append(("aria2c{}".format(tag),
+            "aria2c -x 16 -s 16 -k 1M --retry-wait=5 --max-tries=5"
+            " --continue=true --auto-file-renaming=false"
+            " --console-log-level=notice --summary-interval=5"
+            " --dir='{}' {} '{}'".format(dest, ap, url)))
+    if _has_tool("wget"):
+        cmds.append(("wget{}".format(tag),
+            "wget --continue --tries=5 --waitretry=5"
+            " --progress=bar:force --directory-prefix='{}'"
+            " --user-agent='Mozilla/5.0' {} '{}' 2>&1".format(dest, wp, url)))
+    if _has_tool("curl"):
+        cmds.append(("curl{}".format(tag),
+            "curl -L -C - --retry 5 --retry-delay 5 --retry-all-errors"
+            " --progress-bar --user-agent 'Mozilla/5.0'"
+            " {} -o '{}' '{}'".format(p, outfile, url)))
+
+    if not cmds:
+        cmds.append(("wget-fallback",
+            "wget -O '{}' '{}' 2>&1".format(outfile, url)))
+
+    return cmds
+
+
+def _run_cmd(job_id, tool, cmd):
+    _push_output(job_id, "  -> {}".format(tool))
+    with _jobs_lock:
+        if job_id in _jobs:
+            _jobs[job_id]["current_cmd"] = tool
+    try:
+        proc = subprocess.Popen(
+            cmd, shell=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+            stdin=subprocess.DEVNULL,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"}
+        )
+        with _jobs_lock:
+            if job_id in _jobs:
+                _jobs[job_id]["pid"] = proc.pid
+
+        for raw_line in proc.stdout:
+            line = raw_line.rstrip()
+            if not line:
+                continue
+            clean = strip_ansi(line)
+            if not clean.strip():
+                continue
+            clean_prog, prog_data = _parse_progress(clean)
+            if clean_prog:
+                _push_output(job_id, clean_prog, is_progress=True)
+                with _jobs_lock:
+                    if job_id in _jobs and prog_data:
+                        _jobs[job_id]["progress"] = prog_data
+            else:
+                _push_output(job_id, clean)
+
+        proc.wait()
+        with _jobs_lock:
+            if job_id in _jobs:
+                _jobs[job_id]["pid"] = None
+        return proc.returncode
+    except Exception as e:
+        _push_output(job_id, "  ERROR running {}: {}".format(tool, e))
+        return 1
+
+
+def _verify_downloads(job_id, dest, marker_time):
+    try:
+        new_files = []
+        skip_exts = {".json", ".aria2", ".part", ".ytdl", ".tmp", ".log"}
+        for p in sorted(Path(dest).rglob("*")):
+            if p.is_file() and p.suffix not in skip_exts:
+                try:
+                    if p.stat().st_mtime >= marker_time - 5:
+                        sz = p.stat().st_size
+                        if sz > 0:
+                            if sz > 1024 ** 3:
+                                sz_str = "{:.2f} GB".format(sz / 1024 ** 3)
+                            elif sz > 1024 ** 2:
+                                sz_str = "{:.1f} MB".format(sz / 1024 ** 2)
+                            else:
+                                sz_str = "{:.1f} KB".format(sz / 1024)
+                            new_files.append((p.name, sz_str, sz))
+                except Exception:
+                    pass
+        if new_files:
+            _push_output(job_id, "")
+            _push_output(job_id, "  Downloaded files:")
+            total = 0
+            for name, sz_str, sz_raw in new_files:
+                _push_output(job_id, "    {} ({})".format(name, sz_str))
+                total += sz_raw
+            if total > 1024 ** 3:
+                total_str = "{:.2f} GB".format(total / 1024 ** 3)
+            else:
+                total_str = "{:.1f} MB".format(total / 1024 ** 2)
+            _push_output(job_id, "    Total: {}".format(total_str))
+            with _jobs_lock:
+                if job_id in _jobs:
+                    _jobs[job_id]["verified_files"] = [(n, s) for n, s, _ in new_files]
+        else:
+            _push_output(job_id, "  Warning: No new files detected (may already exist)")
+    except Exception as e:
+        _push_output(job_id, "  Verification error: {}".format(e))
+
+
+def _run_download_job(job_id, urls, dest, method):
+    """
+    Primary: call ~/download.sh directly (battle-tested).
+    Fallback: inline Python downloader if script not found.
+    """
+    with _jobs_lock:
+        _jobs[job_id]["status"]  = "running"
+        _jobs[job_id]["started"] = time.strftime("%H:%M:%S")
+
+    try:
+        os.makedirs(dest, exist_ok=True)
+    except Exception as e:
+        _push_output(job_id, "ERROR: Cannot create destination: {}".format(e))
+        with _jobs_lock:
+            _jobs[job_id]["status"]   = "failed"
+            _jobs[job_id]["finished"] = time.strftime("%H:%M:%S")
+        return
+
+    free_gb = _disk_free_gb(dest)
+    if free_gb < 1.0:
+        _push_output(job_id, "  WARNING: Low disk space: {:.1f} GB free".format(free_gb))
+    else:
+        _push_output(job_id, "  Disk free: {:.1f} GB  ->  {}".format(free_gb, dest))
+
+    use_script = os.path.isfile(DOWNLOAD_SCRIPT)
+
+    if use_script:
+        # Build: bash ~/download.sh -d DEST -u URL1 -u URL2 --sequential
+        cmd_parts = ["bash", DOWNLOAD_SCRIPT, "-d", dest, "--sequential"]
+        for u in urls:
+            cmd_parts += ["-u", u]
+        env = {**os.environ, "NON_INTERACTIVE": "1", "DL_METHOD": method, "TERM": "xterm"}
+
+        _push_output(job_id, "  Calling download.sh ({} URL(s))".format(len(urls)))
+        _push_output(job_id, "  Dest: {}".format(dest))
+        _push_output(job_id, "-" * 50)
+
+        try:
+            proc = subprocess.Popen(
+                cmd_parts,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+                env=env,
+                stdin=subprocess.DEVNULL,  # CRITICAL: never block on stdin
+            )
+            with _jobs_lock:
+                if job_id in _jobs:
+                    _jobs[job_id]["pid"] = proc.pid
+                    _jobs[job_id]["current_url"] = urls[0] if urls else ""
+
+            for raw_line in proc.stdout:
+                line = raw_line.rstrip()
+                if not line:
+                    continue
+                clean = strip_ansi(line)
+                if not clean:
+                    continue
+                clean_prog, prog_data = _parse_progress(clean)
+                if clean_prog:
+                    _push_output(job_id, clean_prog, is_progress=True)
+                    with _jobs_lock:
+                        if job_id in _jobs and prog_data:
+                            _jobs[job_id]["progress"] = prog_data
+                else:
+                    _push_output(job_id, clean)
+
+            proc.wait()
+            rc = proc.returncode
+            with _jobs_lock:
+                if job_id in _jobs:
+                    _jobs[job_id]["pid"] = None
+
+        except Exception as e:
+            _push_output(job_id, "ERROR: Failed to launch download.sh: {}".format(e))
+            rc = 1
+
+        final_status = "done" if rc == 0 else "failed"
+        _push_output(job_id, "=" * 50)
+        _push_output(job_id, "  Job {} -- {}".format(
+            job_id, "SUCCESS" if rc == 0 else "FAILED (rc={})".format(rc)))
+
+    else:
+        # Inline fallback
+        _push_output(job_id, "  WARNING: download.sh not found at {}".format(DOWNLOAD_SCRIPT))
+        _push_output(job_id, "  Using inline fallback downloader")
+        _push_output(job_id, "-" * 50)
+        failed_urls = []
+
+        for i, url in enumerate(urls):
+            url = url.strip()
+            if not url:
+                continue
+            with _jobs_lock:
+                if job_id in _jobs:
+                    _jobs[job_id]["current_url"] = url
+                    _jobs[job_id]["current_idx"] = i + 1
+                    _jobs[job_id]["progress"] = {}
+
+            marker_time = time.time()
+            _push_output(job_id, "\n  [{}/{}] {}{}".format(
+                i + 1, len(urls), url[:80], "..." if len(url) > 80 else ""))
+
+            if url.startswith("magnet:"):
+                out, _, rc = run(
+                    "curl -s 'http://localhost:{}/api/v2/torrents/add'"
+                    " -F 'urls={}' -F 'savepath={}'".format(WEBUI_PORT, url, dest),
+                    timeout=10
+                )
+                if rc == 0 and "Ok" in out:
+                    _push_output(job_id, "  OK: Added to qBittorrent")
+                else:
+                    _push_output(job_id, "  FAIL: qBittorrent: {}".format(out))
+                    failed_urls.append(url)
+                continue
+
+            cmds = _build_cmds(url, dest, method)
+            tools_str = ", ".join(t for t, _ in cmds)
+            _push_output(job_id, "  Methods: {}".format(tools_str))
+
+            success = False
+            for tool, cmd in cmds:
+                if success:
+                    break
+                rc = _run_cmd(job_id, tool, cmd)
+                if rc == 0:
+                    success = True
+                    _push_output(job_id, "  OK: success via {}".format(tool))
+
+            if success:
+                _verify_downloads(job_id, dest, marker_time)
+            else:
+                failed_urls.append(url)
+                _push_output(job_id, "  FAIL: all methods failed")
+
+        fc = len(failed_urls)
+        if fc == 0:
+            final_status = "done"
+        elif fc < len(urls):
+            final_status = "partial"
+        else:
+            final_status = "failed"
+
+        with _jobs_lock:
+            if job_id in _jobs:
+                _jobs[job_id]["failed_urls"] = failed_urls
+
+        _push_output(job_id, "=" * 50)
+        _push_output(job_id, "  Job {} -- {}".format(job_id, final_status.upper()))
+
+    with _jobs_lock:
+        if job_id in _jobs:
+            _jobs[job_id]["status"]   = final_status
+            _jobs[job_id]["finished"] = time.strftime("%H:%M:%S")
+            _jobs[job_id]["pid"]      = None
+            _jobs[job_id]["progress"] = {}
+
+# ---------------------------------------------------------------------------
+# Download API routes
+# ---------------------------------------------------------------------------
+@app.route("/api/download/dirs")
+def dl_dirs():
+    dirs = list(PRESET_DIRS)
+    try:
+        for entry in sorted(Path(MOUNT_POINT_BASE).iterdir()):
+            if entry.is_dir():
+                path = str(entry)
+                if not any(d["path"] == path for d in dirs):
+                    dirs.append({"label": entry.name, "path": path})
+    except Exception:
+        pass
+    return jsonify(dirs)
+
+
+@app.route("/api/download/start", methods=["POST"])
+def dl_start():
+    data = request.json or {}
+    urls_raw = data.get("urls", "")
+    dest     = data.get("dest", MOUNT_POINT_BASE)
+    method   = data.get("method", "auto")
+    custom   = data.get("custom_dest", "").strip()
+
+    if custom:
+        dest = custom
+
+    try:
+        dest = _safe_path(dest)
+    except ValueError as e:
+        return jsonify({"ok": False, "msg": "Invalid path: {}".format(e)}), 400
+
+    if isinstance(urls_raw, list):
+        urls = [u.strip() for u in urls_raw if u.strip()]
+    else:
+        urls = [u.strip() for u in str(urls_raw).splitlines() if u.strip()]
+    urls = list(dict.fromkeys(urls))
+
+    if not urls:
+        return jsonify({"ok": False, "msg": "No URLs provided"}), 400
+    if method not in ("auto", "direct", "ytdlp", "aria2c", "wget", "curl"):
+        method = "auto"
+
+    job_id = str(uuid.uuid4())[:8]
+    with _jobs_lock:
+        _jobs[job_id] = {
+            "id": job_id, "status": "queued",
+            "urls": urls, "total": len(urls),
+            "dest": dest, "method": method,
+            "output": ["Job {} -- {} URL(s) -> {}".format(job_id, len(urls), dest)],
+            "pid": None, "current_idx": 0, "current_url": "",
+            "current_cmd": "", "failed_urls": [],
+            "progress": {}, "verified_files": [],
+            "started": None, "finished": None,
+        }
+
+    threading.Thread(
+        target=_run_download_job,
+        args=(job_id, urls, dest, method),
+        daemon=True
+    ).start()
+
+    return jsonify({"ok": True, "job_id": job_id,
+                    "msg": "Download started -- job {}".format(job_id)})
+
+
+@app.route("/api/download/jobs")
+def dl_jobs():
+    with _jobs_lock:
+        return jsonify(list(_jobs.values()))
+
+
+@app.route("/api/download/job/<job_id>")
+def dl_job(job_id):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job)
+
+
+@app.route("/api/download/output/<job_id>")
+def dl_output(job_id):
+    def generate():
+        sent = 0
+        while True:
+            with _jobs_lock:
+                job = _jobs.get(job_id)
+            if not job:
+                yield "data: {}\n\n".format(json.dumps("__DONE__"))
+                return
+            lines = job["output"]
+            while sent < len(lines):
+                yield "data: {}\n\n".format(json.dumps(lines[sent]))
+                sent += 1
+            if job["status"] in ("done", "failed", "partial", "cancelled"):
+                yield "data: {}\n\n".format(json.dumps("__DONE__"))
+                return
+            time.sleep(0.5)
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+
+@app.route("/api/download/cancel/<job_id>", methods=["POST"])
+def dl_cancel(job_id):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        return jsonify({"ok": False, "msg": "Job not found"}), 404
+    pid = job.get("pid")
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(1)
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
+        except ProcessLookupError:
+            pass
+    with _jobs_lock:
+        _jobs[job_id]["status"]   = "cancelled"
+        _jobs[job_id]["finished"] = time.strftime("%H:%M:%S")
+        _jobs[job_id]["pid"]      = None
+    return jsonify({"ok": True, "msg": "Job {} cancelled".format(job_id)})
+
+
+@app.route("/api/download/clear", methods=["POST"])
+def dl_clear():
+    with _jobs_lock:
+        done = [jid for jid, j in _jobs.items()
+                if j["status"] in ("done", "failed", "cancelled", "partial")]
+        for jid in done:
+            del _jobs[jid]
+    return jsonify({"ok": True, "msg": "Cleared {} finished job(s)".format(len(done))})
+
+
+@app.route("/api/download/browse")
+def dl_browse():
+    base = request.args.get("path", MOUNT_POINT_BASE)
+    try:
+        base = _safe_path(base)
+        entries = []
+        p = Path(base)
+        if p.parent != p:
+            entries.append({"name": "..", "path": str(p.parent), "type": "dir"})
+        for entry in sorted(p.iterdir()):
+            if entry.is_dir() and not entry.name.startswith("."):
+                entries.append({"name": entry.name, "path": str(entry), "type": "dir"})
+        return jsonify({"path": base, "entries": entries})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/download/tools")
+def dl_tools():
+    tools = ["yt-dlp", "aria2c", "gallery-dl", "wget", "curl", "ffmpeg"]
+    return jsonify({t: _has_tool(t) for t in tools})
+
+# ---------------------------------------------------------------------------
+# File Manager API
+# ---------------------------------------------------------------------------
+@app.route("/api/files/list")
+def files_list():
+    path = request.args.get("path", MOUNT_POINT_BASE)
+    try:
+        path = _safe_path(path)
+        p = Path(path)
+        entries = []
+        for entry in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+            try:
+                stat = entry.stat()
+                sz = stat.st_size
+                if sz > 1024 ** 3:
+                    sz_str = "{:.2f} GB".format(sz / 1024 ** 3)
+                elif sz > 1024 ** 2:
+                    sz_str = "{:.1f} MB".format(sz / 1024 ** 2)
+                elif sz > 1024:
+                    sz_str = "{:.1f} KB".format(sz / 1024)
+                else:
+                    sz_str = "{} B".format(sz)
+                entries.append({
+                    "name":     entry.name,
+                    "path":     str(entry),
+                    "type":     "dir" if entry.is_dir() else "file",
+                    "size":     sz,
+                    "size_str": sz_str,
+                    "mtime":    stat.st_mtime,
+                    "ext":      entry.suffix.lower() if entry.is_file() else "",
+                })
+            except Exception:
+                pass
+        parent = str(p.parent) if p.parent != p else None
+        return jsonify({"path": path, "parent": parent, "entries": entries})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/files/rename", methods=["POST"])
+def files_rename():
+    data = request.json or {}
+    old_path = data.get("path", "").strip()
+    new_name = data.get("name", "").strip()
+
+    if not old_path or not new_name:
+        return jsonify({"ok": False, "msg": "Path and new name are required"}), 400
+    if "/" in new_name or "\\" in new_name or "\x00" in new_name:
+        return jsonify({"ok": False, "msg": "Invalid characters in name"}), 400
+
+    try:
+        old_path = _safe_path(old_path)
+    except ValueError as e:
+        return jsonify({"ok": False, "msg": str(e)}), 400
+
+    old = Path(old_path)
+    if not old.exists():
+        return jsonify({"ok": False, "msg": "File/folder not found"}), 404
+
+    new = old.parent / new_name
+    if new.exists():
+        return jsonify({"ok": False, "msg": "'{}' already exists".format(new_name)}), 409
+
+    try:
+        old.rename(new)
+        return jsonify({"ok": True, "msg": "Renamed to '{}'".format(new_name),
+                        "new_path": str(new)})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": "Rename failed: {}".format(e)}), 500
+
+
+@app.route("/api/files/delete", methods=["POST"])
+def files_delete():
+    data = request.json or {}
+    path = data.get("path", "").strip()
+    if not path:
+        return jsonify({"ok": False, "msg": "Path required"}), 400
+    try:
+        path = _safe_path(path)
+    except ValueError as e:
+        return jsonify({"ok": False, "msg": str(e)}), 400
+
+    p = Path(path)
+    if not p.exists():
+        return jsonify({"ok": False, "msg": "Not found"}), 404
+    if p.is_dir():
+        return jsonify({"ok": False, "msg": "Use file manager to delete folders"}), 400
+    try:
+        p.unlink()
+        return jsonify({"ok": True, "msg": "Deleted '{}'".format(p.name)})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": "Delete failed: {}".format(e)}), 500
+
+# ---------------------------------------------------------------------------
+# Main route
+# ---------------------------------------------------------------------------
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
