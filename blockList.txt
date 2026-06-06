@@ -1,0 +1,7 @@
+# Curated from sources online.
+
+||twitter.com^
+||twttr.com^
+||t.co^
+||twimg.com^
+||x.com^
